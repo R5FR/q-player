@@ -1,0 +1,55 @@
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+.cache/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+.env
+.env.local
+.env.*.local
+
+# Rust / Tauri
+/target/
+**/target/
+**/*.rs.bk
+# Keep Cargo.lock for apps if desired
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/bundle/
+
+# Logs
+logs/
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Coverage, cache
+coverage/
+.cache/
+.pnpm-store/
+
+# Misc
+*.local
+.DS_Store
+
+# Optional: ignore local sqlite DBs and other generated files
+*.db
+*.sqlite
+
+qobuz-player-main/
+
+# End of file

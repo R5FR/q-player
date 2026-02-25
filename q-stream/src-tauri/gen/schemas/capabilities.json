@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capability for Q-Stream","local":true,"windows":["main"],"permissions":["core:default","shell:allow-open","dialog:allow-open","dialog:default","fs:default","fs:allow-read-text-file","fs:allow-write-text-file"]}}

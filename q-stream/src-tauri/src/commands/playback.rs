@@ -1,0 +1,236 @@
+use crate::models::*;
+use crate::state::AppState;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tauri::State;
+
+#[tauri::command]
+pub async fn play_track(
+    track_id: i64,
+    state: State<'_, Arc<AppState>>,
+) -> Result<PlaybackState, String> {
+    // Get the Qobuz client
+    let qobuz = {
+        let guard = state.qobuz.read();
+        guard.clone().ok_or("Not logged in")?
+    };
+
+    // Get streaming URL (tries highest quality first)
+    let track_url = qobuz
+        .get_track_url(track_id)
+        .await
+        .map_err(|e| format!("Failed to get track URL: {}", e))?;
+
+    // Fetch track bytes (from cache or network)
+    let bytes = qobuz
+        .fetch_track_bytes(&track_url)
+        .await
+        .map_err(|e| format!("Failed to fetch track: {}", e))?;
+
+    // Get track metadata
+    let track_info: QobuzTrack = {
+        let qobuz_client = {
+            let guard = state.qobuz.read();
+            guard.clone().ok_or("Not logged in")?
+        };
+        qobuz_client
+            .search(&track_id.to_string(), 1)
+            .await
+            .map_err(|e| format!("Failed to get track info: {}", e))?
+            .tracks
+            .and_then(|t| t.items.into_iter().find(|t| t.id == track_id))
+            .ok_or_else(|| "Track not found".to_string())?
+    };
+
+    let unified = UnifiedTrack {
+        id: track_id.to_string(),
+        title: track_info.title,
+        artist: track_info
+            .performer
+            .as_ref()
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| "Unknown".to_string()),
+        album: track_info
+            .album
+            .as_ref()
+            .map(|a| a.title.clone())
+            .unwrap_or_else(|| "Unknown".to_string()),
+        duration_seconds: track_info.duration,
+        cover_url: track_info
+            .album
+            .as_ref()
+            .and_then(|a| a.image.as_ref())
+            .and_then(|i| i.large.clone()),
+        source: TrackSource::Qobuz { track_id },
+        quality_label: Some(format!(
+            "{}-bit/{}kHz FLAC",
+            track_url.bit_depth, track_url.sampling_rate
+        )),
+        sample_rate: Some(track_url.sampling_rate),
+        bit_depth: Some(track_url.bit_depth),
+    };
+
+    // Play through audio engine
+    {
+        let mut player = state.player.write();
+        player.play_bytes(
+            bytes,
+            unified,
+            Some(track_url.sampling_rate),
+            Some(track_url.bit_depth),
+        )?;
+    }
+
+    let player = state.player.read();
+    Ok(player.playback_state())
+}
+
+#[tauri::command]
+pub async fn pause(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.player.write().pause();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resume(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.player.write().resume();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.player.write().stop();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn seek(position_ms: u64, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.player.write().seek(position_ms);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_volume(volume: f32, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.player.write().set_volume(volume);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_playback_state(
+    state: State<'_, Arc<AppState>>,
+) -> Result<PlaybackState, String> {
+    let player = state.player.read();
+    Ok(player.playback_state())
+}
+
+#[tauri::command]
+pub async fn next_track(state: State<'_, Arc<AppState>>) -> Result<Option<PlaybackState>, String> {
+    let next_track = {
+        let queue = state.queue.read();
+        let mut idx = state.current_index.write();
+        let current = idx.unwrap_or(0);
+        let next = current + 1;
+        if next < queue.len() {
+            *idx = Some(next);
+            Some(queue[next].clone())
+        } else {
+            None
+        }
+    };
+
+    if let Some(track) = next_track {
+        match &track.source {
+            TrackSource::Qobuz { track_id } => {
+                let qobuz = {
+                    let guard = state.qobuz.read();
+                    guard.clone().ok_or("Not logged in")?
+                };
+
+                let track_url = qobuz
+                    .get_track_url(*track_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let bytes = qobuz
+                    .fetch_track_bytes(&track_url)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let mut player = state.player.write();
+                player.play_bytes(
+                    bytes,
+                    track,
+                    Some(track_url.sampling_rate),
+                    Some(track_url.bit_depth),
+                )?;
+
+                Ok(Some(player.playback_state()))
+            }
+            TrackSource::Local { file_path } => {
+                let path = PathBuf::from(file_path);
+                let mut player = state.player.write();
+                player.play_file(&path, track, None, None)?;
+                Ok(Some(player.playback_state()))
+            }
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+pub async fn previous_track(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<PlaybackState>, String> {
+    let prev_track = {
+        let queue = state.queue.read();
+        let mut idx = state.current_index.write();
+        let current = idx.unwrap_or(0);
+        if current > 0 {
+            let prev = current - 1;
+            *idx = Some(prev);
+            Some(queue[prev].clone())
+        } else {
+            None
+        }
+    };
+
+    if let Some(track) = prev_track {
+        match &track.source {
+            TrackSource::Qobuz { track_id } => {
+                let qobuz = {
+                    let guard = state.qobuz.read();
+                    guard.clone().ok_or("Not logged in")?
+                };
+
+                let track_url = qobuz
+                    .get_track_url(*track_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let bytes = qobuz
+                    .fetch_track_bytes(&track_url)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let mut player = state.player.write();
+                player.play_bytes(
+                    bytes,
+                    track,
+                    Some(track_url.sampling_rate),
+                    Some(track_url.bit_depth),
+                )?;
+
+                Ok(Some(player.playback_state()))
+            }
+            TrackSource::Local { file_path } => {
+                let path = PathBuf::from(file_path);
+                let mut player = state.player.write();
+                player.play_file(&path, track, None, None)?;
+                Ok(Some(player.playback_state()))
+            }
+        }
+    } else {
+        Ok(None)
+    }
+}

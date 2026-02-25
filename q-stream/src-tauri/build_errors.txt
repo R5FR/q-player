@@ -1,0 +1,78 @@
+   Compiling q-stream v0.1.0 (C:\Users\Tom\Documents\bordel\Qobuz_player\q-stream\src-tauri)
+error: proc macro panicked
+  --> src\main.rs:72:14
+   |
+72 |         .run(tauri::generate_context!())
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: message: The `frontendDist` configuration is set to `"../dist"` but this path doesn't exist
+
+warning: unused import: `PathBuf`
+ --> src\local_library.rs:4:23
+  |
+4 | use std::path::{Path, PathBuf};
+  |                       ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `HashMap` and `HashSet`
+ --> src\recommendation.rs:3:24
+  |
+3 | use std::collections::{HashMap, HashSet};
+  |                        ^^^^^^^  ^^^^^^^
+
+warning: unused imports: `debug`, `info`, and `warn`
+ --> src\recommendation.rs:4:15
+  |
+4 | use tracing::{debug, info, warn};
+  |               ^^^^^  ^^^^  ^^^^
+
+error[E0308]: mismatched types
+   --> src\local_library.rs:111:9
+    |
+111 |         bit_depth,
+    |         ^^^^^^^^^ expected `Option<u16>`, found `Option<u8>`
+    |
+    = note: expected enum `std::option::Option<u16>`
+               found enum `std::option::Option<u8>`
+
+error: future cannot be sent between threads safely
+   --> src\commands\playback.rs:7:1
+    |
+  7 |   #[tauri::command]
+    |   ^^^^^^^^^^^^^^^^^ future returned by `play_track` is not `Send`
+    |
+   ::: src\main.rs:33:25
+    |
+ 33 |           .invoke_handler(tauri::generate_handler![
+    |  _________________________-
+ 34 | |             // Auth
+ 35 | |             commands::auth::login,
+ 36 | |             commands::auth::logout,
+...   |
+ 70 | |             commands::ui::extract_dominant_color,
+ 71 | |         ])
+    | |_________- in this macro invocation
+    |
+    = help: within `impl std::future::Future<Output = Result<models::PlaybackState, std::string::String>>`, the trait `Send` is not implemented for `*mut ()`
+note: future is not `Send` as this value is used across an await
+   --> src\commands\playback.rs:36:14
+    |
+ 32 |         let qobuz = state.qobuz.read();
+    |             ----- has type `parking_lot::lock_api::RwLockReadGuard<'_, parking_lot::RawRwLock, std::option::Option<QobuzClient>>` which is not `Send`
+...
+ 36 |             .await
+    |              ^^^^^ await occurs here, with `qobuz` maybe used later
+note: required by a bound in `ResultFutureTag::future`
+   --> C:\Users\Tom\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tauri-2.10.2\src\ipc\command.rs:314:42
+    |
+310 |     pub async fn future<T, E, F>(self, value: F) -> Result<InvokeResponseBody, InvokeError>
+    |                  ------ required by a bound in this associated function
+...
+314 |       F: Future<Output = Result<T, E>> + Send,
+    |                                          ^^^^ required by this bound in `ResultFutureTag::future`
+    = note: this error originates in the macro `commands::playback::__cmd__play_track` which comes from the expansion of the macro `tauri::generate_handler` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+For more information about this error, try `rustc --explain E0308`.
+warning: `q-stream` (bin "q-stream") generated 3 warnings
+error: could not compile `q-stream` (bin "q-stream") due to 4 previous errors; 3 warnings emitted
