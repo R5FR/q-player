@@ -15,7 +15,7 @@ export default function AlbumCard({ album, onClick }: AlbumCardProps) {
 
   return (
     <motion.button
-      whileHover={{ y: -4 }}
+      whileHover={{ scale: 1.03 }}
       whileTap={{ scale: 0.98 }}
       onClick={onClick}
       className="group text-left p-3 rounded-xl hover:bg-qs-accent/5 transition-all"

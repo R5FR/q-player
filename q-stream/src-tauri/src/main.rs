@@ -117,6 +117,8 @@ fn main() {
             commands::recommendations::get_library_discovery,
             commands::recommendations::get_user_playlists,
             commands::recommendations::get_artist_enrichment,
+            commands::recommendations::get_unknown_albums_by_known_artists,
+            commands::recommendations::get_genre_exploration,
             // Last.fm
             commands::lastfm::lastfm_start_auth,
             commands::lastfm::lastfm_complete_auth,

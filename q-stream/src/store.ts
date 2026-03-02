@@ -77,6 +77,10 @@ interface AppStore {
   recentlyPlayed: UnifiedTrack[];
   addRecentlyPlayed: (track: UnifiedTrack) => void;
 
+  // Dismissed recommendation albums
+  dismissedAlbums: string[];
+  dismissAlbum: (id: string) => void;
+
   // UI
   dominantColor: [number, number, number];
   setDominantColor: (c: [number, number, number]) => void;
@@ -189,6 +193,14 @@ export const useStore = create<AppStore>((set) => ({
     const filtered = state.recentlyPlayed.filter((t) => t.id !== track.id);
     return { recentlyPlayed: [track, ...filtered].slice(0, 6) };
   }),
+
+  // Dismissed recommendation albums
+  dismissedAlbums: [],
+  dismissAlbum: (id) => set((state) => ({
+    dismissedAlbums: state.dismissedAlbums.includes(id)
+      ? state.dismissedAlbums
+      : [...state.dismissedAlbums, id],
+  })),
 
   // UI
   dominantColor: [18, 18, 24],

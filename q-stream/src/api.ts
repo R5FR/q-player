@@ -186,6 +186,16 @@ export async function getArtistEnrichment(artistName: string): Promise<ArtistEnr
   return invoke("get_artist_enrichment", { artistName });
 }
 
+/** Albums by the user's favorite Qobuz artists not yet saved in their library. */
+export async function getUnknownAlbumsByKnownArtists(): Promise<QobuzAlbumSimple[]> {
+  return invoke("get_unknown_albums_by_known_artists");
+}
+
+/** Genre-exploration recommendations derived from the user's Last.fm listening history. */
+export async function getGenreExploration(lastfmUsername: string): Promise<QobuzAlbumSimple[]> {
+  return invoke("get_genre_exploration", { lastfmUsername });
+}
+
 // ── Local Library ──
 
 export async function importFolder(folderPath: string): Promise<LocalTrack[]> {

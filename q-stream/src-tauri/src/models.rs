@@ -430,6 +430,15 @@ pub struct LastFmRecentTracksContainer {
 pub struct LastFmRecentTrack {
     pub name: String,
     pub artist: LastFmRecentTrackArtist,
+    /// Present for past tracks; absent for the currently-playing track.
+    #[serde(default)]
+    pub date: Option<LastFmDate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastFmDate {
+    /// Unix timestamp as a string (e.g. "1741000000")
+    pub uts: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

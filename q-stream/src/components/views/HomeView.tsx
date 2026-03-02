@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { TrendingUp, Star, Flame, Clock, Play, ListMusic, Compass } from "lucide-react";
+import { TrendingUp, Star, Flame, Clock, Play, ListMusic, Compass, Music2, Sparkles, X } from "lucide-react";
 import { useStore } from "../../store";
 import * as api from "../../api";
 import type { QobuzAlbumSimple, QobuzPlaylist, QobuzTrack, UnifiedTrack } from "../../types";
@@ -33,10 +33,37 @@ function RecentCard({ track, onPlay }: { track: UnifiedTrack; onPlay: () => void
   );
 }
 
+// ── Album card with dismiss button ──────────────────────────────────────────
+function DismissableAlbumCard({
+  album,
+  onClick,
+  onDismiss,
+}: {
+  album: QobuzAlbumSimple;
+  onClick: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="relative group/wrap">
+      <AlbumCard album={album} onClick={onClick} />
+      <button
+        onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+        title="Pas intéressé"
+        className="absolute top-1.5 right-1.5 z-20 w-5 h-5 rounded-full bg-black/60 backdrop-blur-sm
+                   flex items-center justify-center opacity-0 group-hover/wrap:opacity-100
+                   hover:bg-red-500/70 transition text-white/70 hover:text-white"
+      >
+        <X className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
 export default function HomeView() {
   const {
     setView, setViewParam, setAlbumDetail, setPlaylistDetail,
     session, lastfmUser, recentlyPlayed, setPlayback,
+    dismissedAlbums, dismissAlbum,
   } = useStore();
 
   // Recommandations (discovery + last.fm)
@@ -55,22 +82,34 @@ export default function HomeView() {
   const [editorialPlaylists, setEditorialPlaylists] = useState<QobuzPlaylist[]>([]);
   const [editorialLoading, setEditorialLoading] = useState(true);
 
+  // Albums d'artistes favoris (inconnus)
+  const [knownArtistAlbums, setKnownArtistAlbums] = useState<QobuzAlbumSimple[]>([]);
+  const [knownArtistLoading, setKnownArtistLoading] = useState(true);
+
+  // Exploration par genre
+  const [genreAlbums, setGenreAlbums] = useState<QobuzAlbumSimple[]>([]);
+  const [genreLoading, setGenreLoading] = useState(true);
+
   useEffect(() => {
     if (!session.logged_in) return;
     loadReco();
     loadTrending();
     loadEditorial();
+    loadKnownArtistAlbums();
     api.getUserPlaylists().then(setUserPlaylists).catch(() => {});
   }, [session.logged_in]);
 
   useEffect(() => {
     if (!session.logged_in || !lastfmUser) return;
+    // Layer Last.fm recent-playback recs on top of library discovery
     api.getRecentPlaybackRecs(lastfmUser.user_name)
       .then((albums) => setRecoAlbums((prev) => {
         const ids = new Set(prev.map((a) => a.id));
         return [...prev, ...albums.filter((a) => !ids.has(a.id))].slice(0, 12);
       }))
       .catch(() => {});
+    // Genre exploration requires Last.fm
+    loadGenreExploration(lastfmUser.user_name);
   }, [session.logged_in, lastfmUser?.user_name]);
 
   const loadReco = async () => {
@@ -96,6 +135,18 @@ export default function HomeView() {
       setEditorialPlaylists(pls.items || []);
     } catch {}
     setEditorialLoading(false);
+  };
+
+  const loadKnownArtistAlbums = async () => {
+    setKnownArtistLoading(true);
+    try { setKnownArtistAlbums(await api.getUnknownAlbumsByKnownArtists()); } catch {}
+    setKnownArtistLoading(false);
+  };
+
+  const loadGenreExploration = async (username: string) => {
+    setGenreLoading(true);
+    try { setGenreAlbums(await api.getGenreExploration(username)); } catch {}
+    setGenreLoading(false);
   };
 
   const openAlbum = async (albumId: string) => {
@@ -129,6 +180,11 @@ export default function HomeView() {
     />
   );
 
+  // Filter dismissed albums from all recommendation lists
+  const visibleReco = recoAlbums.filter((a) => !dismissedAlbums.includes(a.id));
+  const visibleKnownArtist = knownArtistAlbums.filter((a) => !dismissedAlbums.includes(a.id));
+  const visibleGenre = genreAlbums.filter((a) => !dismissedAlbums.includes(a.id));
+
   return (
     <div className="p-8 space-y-10">
       {/* ── En-tête ── */}
@@ -145,56 +201,58 @@ export default function HomeView() {
         </p>
       </div>
 
-      {/* ── TOP : 2 colonnes — Récemment écouté | Recommandations ── */}
-      <div className="grid grid-cols-2 gap-6">
-        {/* ── Récemment écouté ── */}
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <Clock className="w-4 h-4 text-qs-text-dim" />
-            <h2 className="text-base font-semibold text-white">Récemment écouté</h2>
+      {/* ── TOP : Récemment écouté (pills) ── */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <Clock className="w-4 h-4 text-qs-text-dim" />
+          <h2 className="text-base font-semibold text-white">Récemment écouté</h2>
+        </div>
+        {recentlyPlayed.length === 0 ? (
+          <p className="text-sm text-qs-text-dim py-2">
+            Lance une écoute pour retrouver tes morceaux ici.
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            {recentlyPlayed.map((track) => (
+              <RecentCard key={track.id} track={track} onPlay={() => playRecentItem(track)} />
+            ))}
           </div>
-          {recentlyPlayed.length === 0 ? (
-            <p className="text-sm text-qs-text-dim py-3">
-              Lance une écoute pour retrouver tes morceaux ici.
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {recentlyPlayed.map((track) => (
-                <RecentCard key={track.id} track={track} onPlay={() => playRecentItem(track)} />
-              ))}
-            </div>
-          )}
-        </section>
+        )}
+      </section>
 
-        {/* ── Recommandations ── */}
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <Compass className="w-4 h-4 text-qs-text-dim" />
-            <h2 className="text-base font-semibold text-white">Recommandations</h2>
-            {lastfmUser && (
-              <span className="text-[10px] text-qs-text-dim px-1.5 py-0.5 rounded bg-white/5">
-                via Last.fm
-              </span>
-            )}
-          </div>
-          {recoLoading ? (
-            <div className="flex items-center gap-3 text-qs-text-dim text-sm py-3">
-              <Spinner cls="border-qs-accent/50" />
-              Chargement…
-            </div>
-          ) : recoAlbums.length > 0 ? (
-            <div className="grid grid-cols-3 gap-3">
-              {recoAlbums.slice(0, 6).map((album) => (
-                <AlbumCard key={album.id} album={album} onClick={() => openAlbum(album.id)} />
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-qs-text-dim py-3">
-              Ajoute des favoris pour obtenir des recommandations.
-            </p>
+      {/* ── Recommandations ── */}
+      <section>
+        <div className="flex items-center gap-2 mb-4">
+          <Compass className="w-5 h-5 text-qs-accent" />
+          <h2 className="text-xl font-semibold text-white">Recommandations</h2>
+          {lastfmUser && (
+            <span className="text-[10px] text-qs-text-dim px-1.5 py-0.5 rounded bg-white/5">
+              via Last.fm
+            </span>
           )}
-        </section>
-      </div>
+        </div>
+        {recoLoading ? (
+          <div className="flex items-center gap-3 text-qs-text-dim text-sm py-3">
+            <Spinner cls="border-qs-accent/50" />
+            Chargement…
+          </div>
+        ) : visibleReco.length > 0 ? (
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            {visibleReco.slice(0, 12).map((album) => (
+              <DismissableAlbumCard
+                key={album.id}
+                album={album}
+                onClick={() => openAlbum(album.id)}
+                onDismiss={() => dismissAlbum(album.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-qs-text-dim py-3">
+            Ajoute des favoris pour obtenir des recommandations.
+          </p>
+        )}
+      </section>
 
       {/* ── Tes playlists ── */}
       {userPlaylists.length > 0 && (
@@ -203,9 +261,55 @@ export default function HomeView() {
             <ListMusic className="w-5 h-5 text-qs-accent-2" />
             <h2 className="text-xl font-semibold text-white">Tes playlists</h2>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {userPlaylists.map((pl) => (
               <PlaylistCard key={pl.id} playlist={pl} onClick={() => openPlaylist(pl.id)} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Albums d'artistes favoris ── */}
+      {!knownArtistLoading && visibleKnownArtist.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <Music2 className="w-5 h-5 text-qs-accent" />
+            <h2 className="text-xl font-semibold text-white">Artistes favoris</h2>
+            <span className="text-xs text-qs-text-dim ml-1 px-1.5 py-0.5 rounded bg-white/5">
+              albums à découvrir
+            </span>
+          </div>
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            {visibleKnownArtist.slice(0, 12).map((album) => (
+              <DismissableAlbumCard
+                key={album.id}
+                album={album}
+                onClick={() => openAlbum(album.id)}
+                onDismiss={() => dismissAlbum(album.id)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Exploration par genre ── */}
+      {lastfmUser && !genreLoading && visibleGenre.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <Sparkles className="w-5 h-5 text-qs-accent-2" />
+            <h2 className="text-xl font-semibold text-white">Explorer tes genres</h2>
+            <span className="text-xs text-qs-text-dim ml-1 px-1.5 py-0.5 rounded bg-white/5">
+              via Last.fm + MusicBrainz
+            </span>
+          </div>
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            {visibleGenre.slice(0, 12).map((album) => (
+              <DismissableAlbumCard
+                key={album.id}
+                album={album}
+                onClick={() => openAlbum(album.id)}
+                onDismiss={() => dismissAlbum(album.id)}
+              />
             ))}
           </div>
         </section>
@@ -241,8 +345,8 @@ export default function HomeView() {
             <TrendingUp className="w-5 h-5 text-qs-accent" />
             <h2 className="text-xl font-semibold text-white">Nouvelles sorties</h2>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {featuredAlbums.slice(0, 10).map((album) => (
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            {featuredAlbums.slice(0, 12).map((album) => (
               <AlbumCard key={album.id} album={album} onClick={() => openAlbum(album.id)} />
             ))}
           </div>
@@ -256,8 +360,8 @@ export default function HomeView() {
             <Star className="w-5 h-5 text-amber-400" />
             <h2 className="text-xl font-semibold text-white">Sélection éditoriale</h2>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {editorialPlaylists.slice(0, 10).map((pl) => (
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            {editorialPlaylists.slice(0, 12).map((pl) => (
               <PlaylistCard key={pl.id} playlist={pl} onClick={() => openPlaylist(pl.id)} />
             ))}
           </div>

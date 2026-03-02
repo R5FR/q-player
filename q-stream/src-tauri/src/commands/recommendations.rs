@@ -106,3 +106,40 @@ pub async fn get_artist_enrichment(
     let mb = MusicBrainzClient::new();
     Ok(mb.enrich_artist(&artist_name).await)
 }
+
+/// Albums by the user's favorite Qobuz artists that are NOT already saved in their library.
+/// Useful for surfacing new releases and B-sides from artists the user loves.
+#[tauri::command]
+pub async fn get_unknown_albums_by_known_artists(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<QobuzAlbumSimple>, String> {
+    let qobuz = {
+        let guard = state.qobuz.read();
+        guard.clone().ok_or("Not logged in")?
+    };
+    info!("Fetching unknown albums by favorite artists…");
+    let engine = RecommendationEngine::new(None);
+    engine.get_unknown_albums_by_known_artists(&qobuz, 12).await
+}
+
+/// Genre-exploration recommendations: infer the user's top genres from Last.fm
+/// listening history (via MusicBrainz), then surface popular artists in those
+/// genres that the user doesn't already listen to a lot.
+#[tauri::command]
+pub async fn get_genre_exploration(
+    lastfm_username: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<QobuzAlbumSimple>, String> {
+    let qobuz = {
+        let guard = state.qobuz.read();
+        guard.clone().ok_or("Not logged in")?
+    };
+    info!(
+        "Building genre-exploration recommendations for Last.fm user '{}'…",
+        lastfm_username
+    );
+    let engine = RecommendationEngine::new(None);
+    engine
+        .get_genre_exploration(&lastfm_username, &qobuz, 12)
+        .await
+}
