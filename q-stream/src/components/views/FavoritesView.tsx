@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Heart } from "lucide-react";
+import { BookMarked } from "lucide-react";
 import { useStore } from "../../store";
 import * as api from "../../api";
 import TrackRow from "../cards/TrackRow";
@@ -61,25 +61,26 @@ export default function FavoritesView() {
   return (
     <div className="p-8">
       <div className="flex items-center gap-3 mb-6">
-        <Heart className="w-6 h-6 text-red-400" />
-        <h1 className="text-2xl font-bold text-white">Favorites</h1>
+        <BookMarked className="w-6 h-6 text-qs-accent" />
+        <h1 className="text-2xl font-bold text-white">Bibliothèque</h1>
       </div>
 
-      {/* Tabs */}
+      {/* Onglets */}
       <div className="flex gap-1 mb-6 bg-white/5 rounded-xl p-1 w-fit">
-        {(["tracks", "albums", "artists", "playlists"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition capitalize ${
-              tab === t
-                ? "bg-white/10 text-white"
-                : "text-qs-text-dim hover:text-white"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
+        {(["tracks", "albums", "artists", "playlists"] as const).map((t) => {
+          const label = { tracks: "Titres", albums: "Albums", artists: "Artistes", playlists: "Playlists" }[t];
+          return (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                tab === t ? "bg-white/10 text-white" : "text-qs-text-dim hover:text-white"
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Content */}

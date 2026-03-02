@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store";
 import * as api from "./api";
 import Sidebar from "./components/Sidebar";
@@ -7,7 +8,7 @@ import PlayerBar from "./components/PlayerBar";
 import LoginModal from "./components/LoginModal";
 
 export default function App() {
-  const { session, setSession, dominantColor, setPlayback, setLastfmUser } = useStore();
+  const { session, setSession, dominantColor, setPlayback, setLastfmUser, addRecentlyPlayed } = useStore();
 
   // Restore persisted Qobuz + Last.fm sessions on mount
   useEffect(() => {
@@ -15,22 +16,35 @@ export default function App() {
     api.lastfmGetSession().then((s) => { if (s) setLastfmUser(s); }).catch(() => {});
   }, []);
 
-  // Poll playback state + auto-advance + scrobbling
+  // Poll playback state + scrobbling + smart queue refill
   useEffect(() => {
     if (!session.logged_in) return;
-    let prevPlaying = false;
     let prevTrackId: string | null = null;
     const scrobbledRef = { scrobbled: false };
+    // Track ID for which we last auto-enqueued similar tracks (avoid duplicates)
+    const lastEnqueuedForRef = { trackId: null as string | null };
 
     const interval = setInterval(async () => {
       try {
         const state = await api.getPlaybackState();
 
-        // Track just changed → fire "now playing"
+        // Track just changed → fire "now playing" + check if queue needs refilling
         if (state.current_track && state.current_track.id !== prevTrackId) {
           scrobbledRef.scrobbled = false;
           const t = state.current_track;
+          addRecentlyPlayed(t);
           api.lastfmNowPlaying(t.title, t.artist, Math.round(t.duration_seconds)).catch(() => {});
+
+          // Auto-fill queue with similar tracks when ≤ 2 remain after current
+          if (lastEnqueuedForRef.trackId !== t.id) {
+            api.getQueue().then((q) => {
+              const remaining = q.tracks.length - ((q.current_index ?? 0) + 1);
+              if (remaining <= 2) {
+                lastEnqueuedForRef.trackId = t.id;
+                api.enqueueSimilar(t.title, t.artist).catch(() => {});
+              }
+            }).catch(() => {});
+          }
         }
 
         // Scrobble when 50% of track played (and not yet scrobbled this track)
@@ -45,26 +59,6 @@ export default function App() {
           api.lastfmScrobble(t.title, t.artist, Math.round(t.duration_seconds)).catch(() => {});
         }
 
-        // Detect natural track end: was playing → now stopped, same track
-        if (prevPlaying && !state.is_playing && state.current_track?.id === prevTrackId) {
-          const { repeatMode } = useStore.getState();
-          if (repeatMode === 'one' && state.current_track) {
-            const src = state.current_track.source;
-            if ('Qobuz' in src) {
-              await api.playTrack(src.Qobuz.track_id);
-              const newState = await api.getPlaybackState();
-              setPlayback(newState);
-              return;
-            }
-          } else {
-            try {
-              const nextState = await api.nextTrack();
-              if (nextState) { setPlayback(nextState); return; }
-            } catch {}
-          }
-        }
-
-        prevPlaying = state.is_playing;
         prevTrackId = state.current_track?.id ?? null;
         setPlayback(state);
       } catch {}
@@ -72,16 +66,55 @@ export default function App() {
     return () => clearInterval(interval);
   }, [session.logged_in]);
 
+  // Listen for track-ended event from backend (instant, no polling delay)
+  useEffect(() => {
+    if (!session.logged_in) return;
+
+    const unlisten = listen("track-ended", async () => {
+      const { repeatMode, playback: currentPlayback } = useStore.getState();
+      const track = currentPlayback.current_track;
+
+      if (repeatMode === "one" && track) {
+        const src = track.source;
+        if ("Qobuz" in src) {
+          try {
+            const newState = await api.playTrack(src.Qobuz.track_id);
+            setPlayback(newState);
+          } catch (e) {
+            console.error("Repeat-one failed:", e);
+          }
+          return;
+        }
+      }
+
+      try {
+        const nextState = await api.nextTrack();
+        if (nextState) {
+          setPlayback(nextState);
+        }
+      } catch (e) {
+        console.error("Auto-advance failed:", e);
+      }
+    });
+
+    return () => { unlisten.then((fn) => fn()); };
+  }, [session.logged_in]);
+
   const [r, g, b] = dominantColor;
+  // Crush album colour to near-black so it barely tints the dark background
+  const dr = Math.floor(r * 0.06) + 4;
+  const dg = Math.floor(g * 0.05) + 4;
+  const db = Math.floor(b * 0.10) + 10;
 
   return (
     <div
       className="h-screen w-screen flex flex-col dynamic-bg"
       style={{
-        backgroundColor: `rgb(${r}, ${g}, ${b})`,
+        backgroundColor: `rgb(${dr}, ${dg}, ${db})`,
         backgroundImage: `
-          radial-gradient(ellipse at 20% 50%, rgba(${r + 20}, ${g + 20}, ${b + 40}, 0.3) 0%, transparent 50%),
-          radial-gradient(ellipse at 80% 20%, rgba(${r + 10}, ${g + 15}, ${b + 30}, 0.2) 0%, transparent 50%)
+          radial-gradient(ellipse at 15% 60%, rgba(0, 212, 255, 0.04) 0%, transparent 55%),
+          radial-gradient(ellipse at 85% 15%, rgba(139, 92, 246, 0.04) 0%, transparent 55%),
+          radial-gradient(ellipse at 50% 90%, rgba(${Math.floor(r * 0.4)}, ${Math.floor(g * 0.35)}, ${Math.floor(b * 0.5)}, 0.06) 0%, transparent 50%)
         `,
       }}
     >

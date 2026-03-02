@@ -11,6 +11,10 @@ interface TrackRowProps {
   showFavorite?: boolean;
   albumCover?: string;
   albumTitle?: string;
+  /** When provided, clicking the row plays the full album queue from this track's position */
+  onPlayInAlbum?: () => void;
+  /** Show a loading spinner on this row (e.g. while the album queue is being built) */
+  isLoading?: boolean;
 }
 
 export default function TrackRow({
@@ -20,10 +24,17 @@ export default function TrackRow({
   showFavorite,
   albumCover,
   albumTitle,
+  onPlayInAlbum,
+  isLoading,
 }: TrackRowProps) {
   const { setPlayback } = useStore();
 
   const handlePlay = async () => {
+    // If album context is provided, delegate queue management to the parent
+    if (onPlayInAlbum) {
+      onPlayInAlbum();
+      return;
+    }
     try {
       const state = await api.playTrack(track.id);
       setPlayback(state);
@@ -62,18 +73,28 @@ export default function TrackRow({
 
   return (
     <motion.div
-      whileHover={{ backgroundColor: "rgba(255,255,255,0.03)" }}
-      className="grid grid-cols-[40px_1fr_1fr_80px] gap-4 px-4 py-2.5 rounded-lg group items-center cursor-pointer"
+      whileHover={{ backgroundColor: "rgba(0,212,255,0.04)" }}
+      className="grid grid-cols-[40px_1fr_1fr_80px] gap-4 px-4 py-2.5 rounded-lg group items-center cursor-pointer border-l-2 border-transparent hover:border-qs-accent/30 transition-colors"
       onClick={handlePlay}
     >
-      {/* Number / Play */}
+      {/* Number / Play / Loading */}
       <div className="flex items-center justify-center">
-        {showNumber && (
-          <span className="text-sm text-qs-text-dim group-hover:hidden">
-            {index ?? track.track_number}
-          </span>
+        {isLoading ? (
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            className="w-3.5 h-3.5 border-2 border-qs-accent border-t-transparent rounded-full"
+          />
+        ) : showNumber ? (
+          <>
+            <span className="text-sm text-qs-text-dim group-hover:hidden">
+              {index ?? track.track_number}
+            </span>
+            <Play className="w-3.5 h-3.5 text-qs-accent hidden group-hover:block" />
+          </>
+        ) : (
+          <Play className="w-3.5 h-3.5 text-qs-accent opacity-0 group-hover:opacity-100" />
         )}
-        <Play className={`w-3.5 h-3.5 text-white ${showNumber ? "hidden group-hover:block" : "opacity-0 group-hover:opacity-100"}`} />
       </div>
 
       {/* Title + Album cover */}

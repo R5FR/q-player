@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { Search as SearchIcon, X } from "lucide-react";
+import { Search as SearchIcon } from "lucide-react";
 import { useStore } from "../../store";
 import * as api from "../../api";
 import AlbumCard from "../cards/AlbumCard";
@@ -9,7 +9,6 @@ import TrackRow from "../cards/TrackRow";
 export default function SearchView() {
   const {
     searchQuery,
-    setSearchQuery,
     searchResults,
     setSearchResults,
     setView,
@@ -57,29 +56,6 @@ export default function SearchView() {
 
   return (
     <div className="p-8">
-      {/* Search bar */}
-      <div className="relative max-w-xl mb-8">
-        <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-qs-text-dim" />
-        <input
-          type="text"
-          placeholder="Search tracks, albums, artists..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          autoFocus
-          className="w-full pl-12 pr-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-white placeholder:text-qs-text-dim focus:outline-none focus:border-qs-accent/50 transition text-sm"
-        />
-        {searchQuery && (
-          <button
-            onClick={() => {
-              setSearchQuery("");
-              setSearchResults(null);
-            }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-qs-text-dim hover:text-white"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
 
       {loading && (
         <div className="flex justify-center py-12">

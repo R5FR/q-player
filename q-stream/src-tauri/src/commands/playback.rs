@@ -105,8 +105,7 @@ pub async fn stop(state: State<'_, Arc<AppState>>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn seek(position_ms: u64, state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    state.player.write().seek(position_ms);
-    Ok(())
+    state.player.write().seek(position_ms)
 }
 
 #[tauri::command]
@@ -232,5 +231,62 @@ pub async fn previous_track(
         }
     } else {
         Ok(None)
+    }
+}
+
+/// Play the track at a given queue index, reusing the metadata already stored in the queue entry.
+/// Unlike `play_track`, this does NOT perform a Qobuz catalog search — only the stream URL and
+/// audio bytes are fetched. Use this after building a queue with `add_to_queue` / `clear_queue`.
+#[tauri::command]
+pub async fn play_from_queue(
+    idx: usize,
+    state: State<'_, Arc<AppState>>,
+) -> Result<PlaybackState, String> {
+    let track = {
+        let queue = state.queue.read();
+        if idx >= queue.len() {
+            return Err(format!(
+                "Queue index {} out of bounds (queue len={})",
+                idx,
+                queue.len()
+            ));
+        }
+        *state.current_index.write() = Some(idx);
+        queue[idx].clone()
+    };
+
+    match &track.source {
+        TrackSource::Qobuz { track_id } => {
+            let qobuz = {
+                let guard = state.qobuz.read();
+                guard.clone().ok_or("Not logged in")?
+            };
+
+            let track_url = qobuz
+                .get_track_url(*track_id)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let bytes = qobuz
+                .fetch_track_bytes(&track_url)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let mut player = state.player.write();
+            player.play_bytes(
+                bytes,
+                track,
+                Some(track_url.sampling_rate),
+                Some(track_url.bit_depth),
+            )?;
+
+            Ok(player.playback_state())
+        }
+        TrackSource::Local { file_path } => {
+            let path = PathBuf::from(file_path);
+            let mut player = state.player.write();
+            player.play_file(&path, track, None, None)?;
+            Ok(player.playback_state())
+        }
     }
 }

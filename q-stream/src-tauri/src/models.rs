@@ -394,3 +394,82 @@ pub struct LastFmTrack {
 pub struct LastFmArtist {
     pub name: String,
 }
+
+// ── Last.fm user history models ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastFmTopArtistsResponse {
+    pub topartists: LastFmTopArtistsContainer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastFmTopArtistsContainer {
+    #[serde(rename = "artist")]
+    pub items: Vec<LastFmTopArtist>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastFmTopArtist {
+    pub name: String,
+}
+
+// ── Last.fm recent tracks (user.getRecentTracks) ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastFmRecentTracksResponse {
+    pub recenttracks: LastFmRecentTracksContainer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastFmRecentTracksContainer {
+    #[serde(rename = "track")]
+    pub items: Vec<LastFmRecentTrack>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastFmRecentTrack {
+    pub name: String,
+    pub artist: LastFmRecentTrackArtist,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastFmRecentTrackArtist {
+    // Last.fm uses "#text" for the artist name in recent tracks
+    #[serde(rename = "#text")]
+    pub name: String,
+}
+
+// ── MusicBrainz / Wikipedia enrichment ──
+
+/// Returned by the `get_artist_enrichment` command to the frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtistEnrichment {
+    pub genres: Vec<String>,
+    pub bio: Option<String>,
+    pub mbid: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MusicBrainzSearchResponse {
+    pub artists: Vec<MusicBrainzArtist>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MusicBrainzArtist {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub tags: Vec<MusicBrainzTag>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MusicBrainzTag {
+    pub count: u32,
+    pub name: String,
+}
+
+/// Response from Wikipedia REST API summary endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WikipediaSummary {
+    pub extract: Option<String>,
+}

@@ -9,7 +9,6 @@ import {
   VolumeX,
   Shuffle,
   Repeat,
-  ChevronUp,
 } from "lucide-react";
 import { useStore } from "../store";
 import * as api from "../api";
@@ -17,14 +16,11 @@ import * as api from "../api";
 export default function PlayerBar() {
   const { playback, setPlayback, setDominantColor, shuffle, setShuffle, repeatMode, cycleRepeat } = useStore();
   const [showVolSlider, setShowVolSlider] = useState(false);
-  const progressRef = useRef<HTMLDivElement>(null);
+  const [seekOverride, setSeekOverride] = useState<number | null>(null);
+  const seekClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevCoverRef = useRef<string | null>(null);
 
   const track = playback.current_track;
-  const progress =
-    playback.duration_ms > 0
-      ? (playback.position_ms / playback.duration_ms) * 100
-      : 0;
 
   // Extract dominant color when cover changes
   useEffect(() => {
@@ -67,13 +63,26 @@ export default function PlayerBar() {
     }
   };
 
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!progressRef.current || playback.duration_ms === 0) return;
-    const rect = progressRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const pct = Math.max(0, Math.min(1, x / rect.width));
-    const posMs = Math.round(pct * playback.duration_ms);
-    api.seek(posMs);
+  // Seek via native range input — onChange = live preview, onPointerUp = commit to backend
+  const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSeekOverride(Number(e.target.value));
+  };
+
+  const handleSeekCommit = async (e: React.PointerEvent<HTMLInputElement>) => {
+    const posMs = Number((e.target as HTMLInputElement).value);
+    setSeekOverride(posMs);
+    try {
+      await api.seek(posMs);
+      // Refresh immediately — critical when restarting a finished track so the
+      // UI switches back to "playing" without waiting for the next 500ms poll.
+      const state = await api.getPlaybackState();
+      setPlayback(state);
+    } catch (err) {
+      console.error(err);
+    }
+    // Keep override briefly while the decoder thread processes the seek
+    if (seekClearRef.current) clearTimeout(seekClearRef.current);
+    seekClearRef.current = setTimeout(() => setSeekOverride(null), 300);
   };
 
   const handleShuffle = async () => {
@@ -176,12 +185,12 @@ export default function PlayerBar() {
             <motion.button
               whileTap={{ scale: 0.9 }}
               onClick={togglePlay}
-              className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 transition"
+              className="btn-play-cyber w-9 h-9 rounded-full flex items-center justify-center"
             >
               {playback.is_playing ? (
-                <Pause className="w-4 h-4 text-black" />
+                <Pause className="w-4 h-4 text-qs-accent" />
               ) : (
-                <Play className="w-4 h-4 text-black ml-0.5" />
+                <Play className="w-4 h-4 text-qs-accent ml-0.5" />
               )}
             </motion.button>
             <button
@@ -203,24 +212,44 @@ export default function PlayerBar() {
             </button>
           </div>
 
-          {/* Progress bar */}
+          {/* Progress / seek */}
           <div className="w-full max-w-[600px] flex items-center gap-2">
-            <span className="text-[10px] text-qs-text-dim w-10 text-right">
-              {formatTime(playback.position_ms)}
+            <span className="text-[10px] text-qs-text-dim w-10 text-right select-none font-mono">
+              {formatTime(seekOverride !== null ? seekOverride : playback.position_ms)}
             </span>
-            <div
-              ref={progressRef}
-              onClick={handleSeek}
-              className="flex-1 h-1 bg-white/10 rounded-full cursor-pointer group relative"
-            >
-              <motion.div
-                className="h-full bg-white rounded-full relative"
-                style={{ width: `${progress}%` }}
-              >
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition shadow" />
-              </motion.div>
+            <div className="flex-1 relative progress-track-container group">
+              <div className="progress-track">
+                <div
+                  className="progress-fill"
+                  style={{
+                    width: `${playback.duration_ms > 0 ? ((seekOverride !== null ? seekOverride : playback.position_ms) / playback.duration_ms) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+              {/* Invisible range input on top for interaction */}
+              <input
+                type="range"
+                min={0}
+                max={playback.duration_ms || 1}
+                step={500}
+                value={seekOverride !== null ? seekOverride : playback.position_ms}
+                onChange={handleSeekChange}
+                onPointerUp={handleSeekCommit}
+                className="absolute inset-0 w-full opacity-0 cursor-pointer"
+                style={{ height: '20px', top: '-8px' }}
+              />
+              {/* Thumb indicator */}
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full pointer-events-none
+                  opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                style={{
+                  left: `calc(${playback.duration_ms > 0 ? ((seekOverride !== null ? seekOverride : playback.position_ms) / playback.duration_ms) * 100 : 0}% - 5px)`,
+                  background: '#00d4ff',
+                  boxShadow: '0 0 8px rgba(0,212,255,0.8)',
+                }}
+              />
             </div>
-            <span className="text-[10px] text-qs-text-dim w-10">
+            <span className="text-[10px] text-qs-text-dim w-10 select-none font-mono">
               {formatTime(playback.duration_ms)}
             </span>
           </div>
@@ -245,9 +274,11 @@ export default function PlayerBar() {
             step={0.01}
             value={playback.volume}
             onChange={handleVolume}
-            className="w-24 h-1 accent-white bg-white/10 rounded-full appearance-none cursor-pointer
-              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
-              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+            className="w-24 h-1 rounded-full appearance-none cursor-pointer bg-qs-text-dim/20
+              accent-qs-accent
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5
+              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-qs-accent
+              [&::-webkit-slider-thumb]:shadow-[0_0_6px_rgba(0,212,255,0.7)]"
           />
         </div>
       </div>

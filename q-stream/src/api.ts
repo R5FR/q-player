@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   PlaybackState,
   QobuzAlbum,
+  QobuzAlbumSimple,
   QobuzArtist,
   QobuzAlbumList,
   QobuzFavorites,
@@ -14,6 +15,7 @@ import type {
   UnifiedTrack,
   LocalTrack,
   LastFmUserSession,
+  ArtistEnrichment,
 } from "./types";
 
 // ── Auth ──
@@ -72,6 +74,10 @@ export async function previousTrack(): Promise<PlaybackState | null> {
   return invoke("previous_track");
 }
 
+export async function playFromQueue(idx: number): Promise<PlaybackState> {
+  return invoke("play_from_queue", { idx });
+}
+
 // ── Browse ──
 
 export async function search(query: string): Promise<QobuzSearchResults> {
@@ -126,18 +132,58 @@ export async function addToQueue(track: UnifiedTrack): Promise<QueueState> {
   return invoke("add_to_queue", { track });
 }
 
+export async function addTracksToQueue(tracks: UnifiedTrack[]): Promise<QueueState> {
+  return invoke("add_tracks_to_queue", { tracks });
+}
+
 export async function clearQueue(): Promise<void> {
   return invoke("clear_queue");
+}
+
+export async function playNext(track: UnifiedTrack): Promise<QueueState> {
+  return invoke("play_next", { track });
+}
+
+export async function removeFromQueue(index: number): Promise<QueueState> {
+  return invoke("remove_from_queue", { index });
 }
 
 export async function smartShuffle(lastfmApiKey?: string): Promise<QueueState> {
   return invoke("smart_shuffle", { lastfmApiKey: lastfmApiKey ?? null });
 }
 
+export async function enqueueSimilar(trackTitle: string, trackArtist: string): Promise<number> {
+  return invoke("enqueue_similar", { trackTitle, trackArtist });
+}
+
 // ── Recommendations ──
 
 export async function getTrendingTracks(): Promise<QobuzTrack[]> {
   return invoke("get_trending_tracks");
+}
+
+export async function getPersonalizedRecommendations(lastfmUsername: string): Promise<QobuzAlbumSimple[]> {
+  return invoke("get_personalized_recommendations", { lastfmUsername });
+}
+
+/** Albums matching recently played artists (Last.fm user.getRecentTracks → Qobuz). */
+export async function getRecentPlaybackRecs(lastfmUsername: string): Promise<QobuzAlbumSimple[]> {
+  return invoke("get_recent_playback_recommendations", { lastfmUsername });
+}
+
+/** Discovery albums based on artists in the user's Qobuz library (favorites + playlists). */
+export async function getLibraryDiscovery(): Promise<QobuzAlbumSimple[]> {
+  return invoke("get_library_discovery");
+}
+
+/** The user's own Qobuz playlists. */
+export async function getUserPlaylists(): Promise<QobuzPlaylist[]> {
+  return invoke("get_user_playlists");
+}
+
+/** MusicBrainz genres + Wikipedia excerpt for an artist. */
+export async function getArtistEnrichment(artistName: string): Promise<ArtistEnrichment> {
+  return invoke("get_artist_enrichment", { artistName });
 }
 
 // ── Local Library ──

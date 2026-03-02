@@ -183,3 +183,9 @@ export interface LastFmUserSession {
   session_key: string;
   user_name: string;
 }
+
+export interface ArtistEnrichment {
+  genres: string[];
+  bio?: string;
+  mbid?: string;
+}

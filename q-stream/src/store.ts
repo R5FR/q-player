@@ -11,7 +11,16 @@ import type {
   SessionInfo,
   LocalTrack,
   LastFmUserSession,
+  UnifiedTrack,
 } from "./types";
+
+interface NavEntry {
+  view: ViewType;
+  param: string | null;
+  albumDetail: QobuzAlbum | null;
+  artistDetail: QobuzArtist | null;
+  playlistDetail: QobuzPlaylist | null;
+}
 
 interface AppStore {
   // Session
@@ -23,6 +32,10 @@ interface AppStore {
   setView: (v: ViewType) => void;
   viewParam: string | null;
   setViewParam: (p: string | null) => void;
+  navHistory: NavEntry[];
+  navHistoryIndex: number;
+  goBack: () => void;
+  goForward: () => void;
 
   // Playback
   playback: PlaybackState;
@@ -60,6 +73,10 @@ interface AppStore {
   localTracks: LocalTrack[];
   setLocalTracks: (t: LocalTrack[]) => void;
 
+  // Recently played
+  recentlyPlayed: UnifiedTrack[];
+  addRecentlyPlayed: (track: UnifiedTrack) => void;
+
   // UI
   dominantColor: [number, number, number];
   setDominantColor: (c: [number, number, number]) => void;
@@ -80,9 +97,48 @@ export const useStore = create<AppStore>((set) => ({
 
   // Navigation
   currentView: "home",
-  setView: (currentView) => set({ currentView }),
+  setView: (view) => set((state) => {
+    const entry: NavEntry = {
+      view,
+      param: state.viewParam,
+      albumDetail: state.albumDetail,
+      artistDetail: state.artistDetail,
+      playlistDetail: state.playlistDetail,
+    };
+    const truncated = state.navHistory.slice(0, state.navHistoryIndex + 1);
+    const newHist = [...truncated, entry];
+    return { currentView: view, navHistory: newHist, navHistoryIndex: newHist.length - 1 };
+  }),
   viewParam: null,
   setViewParam: (viewParam) => set({ viewParam }),
+  navHistory: [{ view: "home" as ViewType, param: null, albumDetail: null, artistDetail: null, playlistDetail: null }],
+  navHistoryIndex: 0,
+  goBack: () => set((state) => {
+    if (state.navHistoryIndex <= 0) return {};
+    const newIndex = state.navHistoryIndex - 1;
+    const entry = state.navHistory[newIndex];
+    return {
+      currentView: entry.view,
+      viewParam: entry.param,
+      navHistoryIndex: newIndex,
+      albumDetail: entry.albumDetail,
+      artistDetail: entry.artistDetail,
+      playlistDetail: entry.playlistDetail,
+    };
+  }),
+  goForward: () => set((state) => {
+    if (state.navHistoryIndex >= state.navHistory.length - 1) return {};
+    const newIndex = state.navHistoryIndex + 1;
+    const entry = state.navHistory[newIndex];
+    return {
+      currentView: entry.view,
+      viewParam: entry.param,
+      navHistoryIndex: newIndex,
+      albumDetail: entry.albumDetail,
+      artistDetail: entry.artistDetail,
+      playlistDetail: entry.playlistDetail,
+    };
+  }),
 
   // Playback
   playback: {
@@ -126,6 +182,13 @@ export const useStore = create<AppStore>((set) => ({
   // Local library
   localTracks: [],
   setLocalTracks: (localTracks) => set({ localTracks }),
+
+  // Recently played
+  recentlyPlayed: [],
+  addRecentlyPlayed: (track) => set((state) => {
+    const filtered = state.recentlyPlayed.filter((t) => t.id !== track.id);
+    return { recentlyPlayed: [track, ...filtered].slice(0, 6) };
+  }),
 
   // UI
   dominantColor: [18, 18, 24],

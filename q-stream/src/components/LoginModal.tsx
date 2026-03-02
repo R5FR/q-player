@@ -40,7 +40,7 @@ export default function LoginModal() {
           initial={{ scale: 0.9, y: 20 }}
           animate={{ scale: 1, y: 0 }}
           transition={{ type: "spring", damping: 25 }}
-          className="glass rounded-2xl p-8 w-full max-w-md mx-4"
+          className="border-gradient-cyber rounded-2xl p-8 w-full max-w-md mx-4"
         >
           {/* Logo */}
           <div className="flex flex-col items-center mb-8">
@@ -66,7 +66,7 @@ export default function LoginModal() {
                 placeholder="Qobuz Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-qs-text-dim focus:outline-none focus:border-qs-accent/50 focus:ring-1 focus:ring-qs-accent/30 transition"
+                className="input-cyber w-full pl-10 pr-4 py-3"
               />
             </div>
             <div className="relative">
@@ -76,7 +76,7 @@ export default function LoginModal() {
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-qs-text-dim focus:outline-none focus:border-qs-accent/50 focus:ring-1 focus:ring-qs-accent/30 transition"
+                className="input-cyber w-full pl-10 pr-4 py-3"
               />
             </div>
 

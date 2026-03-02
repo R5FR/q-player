@@ -1,10 +1,21 @@
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useStore } from "../../store";
 import * as api from "../../api";
+import type { ArtistEnrichment } from "../../types";
 import AlbumCard from "../cards/AlbumCard";
 
 export default function ArtistView() {
   const { artistDetail, setView, setViewParam, setAlbumDetail } = useStore();
+  const [enrichment, setEnrichment] = useState<ArtistEnrichment | null>(null);
+
+  useEffect(() => {
+    if (!artistDetail) return;
+    setEnrichment(null);
+    api.getArtistEnrichment(artistDetail.name)
+      .then(setEnrichment)
+      .catch(console.error);
+  }, [artistDetail?.id]);
 
   if (!artistDetail) {
     return (
@@ -16,11 +27,13 @@ export default function ArtistView() {
 
   const artist = artistDetail;
   const imageUrl = artist.image?.large;
+  const genres = enrichment?.genres ?? [];
+  const bio = artist.biography?.content ?? enrichment?.bio ?? null;
 
   return (
     <div className="p-8">
       {/* Header */}
-      <div className="flex items-end gap-6 mb-8">
+      <div className="flex items-end gap-6 mb-6">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -35,19 +48,40 @@ export default function ArtistView() {
           )}
         </motion.div>
 
-        <div>
-          <p className="text-xs text-qs-text-dim uppercase tracking-wider mb-1">Artist</p>
-          <h1 className="text-5xl font-bold text-white mb-2">{artist.name}</h1>
+        <div className="min-w-0">
+          <p className="text-xs text-qs-text-dim uppercase tracking-wider mb-1">Artiste</p>
+          <h1 className="text-5xl font-bold text-white mb-3">{artist.name}</h1>
+
+          {/* Genre tags from MusicBrainz */}
+          {genres.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {genres.map((g) => (
+                <span
+                  key={g}
+                  className="px-2 py-0.5 text-xs rounded-full bg-white/10 text-qs-text-dim hover:bg-white/15 transition"
+                >
+                  {g}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Biography */}
-      {artist.biography?.content && (
+      {/* Biography — Qobuz first, Wikipedia as fallback */}
+      {bio && (
         <div className="mb-8 max-w-2xl">
-          <h3 className="text-lg font-semibold text-white mb-2">About</h3>
+          <div className="flex items-center gap-2 mb-2">
+            <h3 className="text-lg font-semibold text-white">À propos</h3>
+            {!artist.biography?.content && enrichment?.bio && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-qs-text-dim">
+                via Wikipedia
+              </span>
+            )}
+          </div>
           <p
-            className="text-sm text-qs-text-dim leading-relaxed line-clamp-4"
-            dangerouslySetInnerHTML={{ __html: artist.biography.content }}
+            className="text-sm text-qs-text-dim leading-relaxed line-clamp-5"
+            dangerouslySetInnerHTML={{ __html: bio }}
           />
         </div>
       )}
@@ -55,7 +89,7 @@ export default function ArtistView() {
       {/* Albums */}
       {artist.albums?.items?.length ? (
         <section>
-          <h3 className="text-lg font-semibold text-white mb-4">Discography</h3>
+          <h3 className="text-lg font-semibold text-white mb-4">Discographie</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {artist.albums.items.map((album) => (
               <AlbumCard
@@ -76,7 +110,7 @@ export default function ArtistView() {
       {/* Similar Artists */}
       {artist.similar_artists?.length ? (
         <section className="mt-8">
-          <h3 className="text-lg font-semibold text-white mb-4">Similar Artists</h3>
+          <h3 className="text-lg font-semibold text-white mb-4">Artistes similaires</h3>
           <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {artist.similar_artists.map((sa) => (
               <button

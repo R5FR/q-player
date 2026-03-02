@@ -8,12 +8,14 @@ mod commands;
 mod lastfm;
 mod local_library;
 mod models;
+mod musicbrainz;
 mod qobuz;
 mod recommendation;
 mod state;
 
 use state::AppState;
 use std::sync::Arc;
+use tauri::Manager;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 fn main() {
@@ -31,6 +33,39 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(app_state)
+        .setup(|app| {
+            use crate::audio::PlayerEvent;
+            use tauri::Emitter;
+
+            let state = app.state::<Arc<AppState>>().inner().clone();
+            let handle = app.handle().clone();
+
+            // Take the event receiver (can only be taken once)
+            let event_rx = state
+                .player_event_rx
+                .lock()
+                .unwrap()
+                .take()
+                .expect("player_event_rx already taken");
+
+            // Bridge player events to Tauri frontend events
+            std::thread::Builder::new()
+                .name("player-events".into())
+                .spawn(move || {
+                    for event in event_rx {
+                        match event {
+                            PlayerEvent::TrackEnded => {
+                                tracing::debug!("Emitting track-ended event to frontend");
+                                handle.emit("track-ended", ()).ok();
+                            }
+                        }
+                    }
+                    tracing::info!("Player event bridge shut down");
+                })
+                .expect("Failed to spawn player event bridge");
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // Auth
             commands::auth::login,
@@ -47,6 +82,7 @@ fn main() {
             commands::playback::get_playback_state,
             commands::playback::next_track,
             commands::playback::previous_track,
+            commands::playback::play_from_queue,
             // Browse
             commands::browse::search,
             commands::browse::get_album,
@@ -62,8 +98,12 @@ fn main() {
             // Queue
             commands::queue::get_queue,
             commands::queue::add_to_queue,
+            commands::queue::add_tracks_to_queue,
             commands::queue::clear_queue,
+            commands::queue::play_next,
+            commands::queue::remove_from_queue,
             commands::queue::smart_shuffle,
+            commands::queue::enqueue_similar,
             // Local library
             commands::local_library::import_folder,
             commands::local_library::get_local_tracks,
@@ -72,6 +112,11 @@ fn main() {
             commands::ui::extract_dominant_color,
             // Recommendations
             commands::recommendations::get_trending_tracks,
+            commands::recommendations::get_personalized_recommendations,
+            commands::recommendations::get_recent_playback_recommendations,
+            commands::recommendations::get_library_discovery,
+            commands::recommendations::get_user_playlists,
+            commands::recommendations::get_artist_enrichment,
             // Last.fm
             commands::lastfm::lastfm_start_auth,
             commands::lastfm::lastfm_complete_auth,

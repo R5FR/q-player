@@ -1,8 +1,9 @@
-use crate::audio::AudioPlayer;
+use crate::audio::{AudioPlayer, PlayerEvent};
 use crate::models::*;
 use crate::qobuz::QobuzClient;
 use parking_lot::RwLock;
 use std::collections::VecDeque;
+use std::sync::mpsc;
 
 /// Shared application state managed by Tauri
 pub struct AppState {
@@ -15,18 +16,22 @@ pub struct AppState {
     pub lastfm: RwLock<Option<LastFmUserSession>>,
     /// Transient token waiting for user to authorize in browser
     pub lastfm_pending_token: RwLock<Option<String>>,
+    /// Receiver for player events (taken once during setup)
+    pub player_event_rx: std::sync::Mutex<Option<mpsc::Receiver<PlayerEvent>>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        let (player, event_rx) = AudioPlayer::new();
         Self {
             qobuz: RwLock::new(None),
-            player: RwLock::new(AudioPlayer::new()),
+            player: RwLock::new(player),
             queue: RwLock::new(VecDeque::new()),
             current_index: RwLock::new(None),
             local_tracks: RwLock::new(Vec::new()),
             lastfm: RwLock::new(None),
             lastfm_pending_token: RwLock::new(None),
+            player_event_rx: std::sync::Mutex::new(Some(event_rx)),
         }
     }
 }
