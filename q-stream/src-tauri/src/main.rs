@@ -84,6 +84,10 @@ fn main() {
             commands::playback::next_track,
             commands::playback::previous_track,
             commands::playback::play_from_queue,
+            commands::playback::set_eq,
+            commands::playback::get_eq_state,
+            commands::playback::get_audio_devices,
+            commands::playback::set_audio_device,
             // Browse
             commands::browse::search,
             commands::browse::get_album,

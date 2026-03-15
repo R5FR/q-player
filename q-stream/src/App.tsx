@@ -12,6 +12,7 @@ export default function App() {
     session, setSession, dominantColor, setPlayback, setLastfmUser, addRecentlyPlayed,
     recentlyPlayed, dismissedAlbums, searchHistory,
     setRecentlyPlayed, setDismissedAlbums, setSearchHistory,
+    isSeeking, sleepTimerEndMs, setSleepTimer,
   } = useStore();
 
   // Restore persisted Qobuz + Last.fm sessions, then load app data from disk
@@ -38,6 +39,18 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [recentlyPlayed, dismissedAlbums, searchHistory]);
 
+  // Sleep timer — stop playback when timer expires
+  useEffect(() => {
+    if (!sleepTimerEndMs) return;
+    const remaining = sleepTimerEndMs - Date.now();
+    if (remaining <= 0) { setSleepTimer(null); return; }
+    const t = setTimeout(async () => {
+      try { await api.pause(); } catch {}
+      setSleepTimer(null);
+    }, remaining);
+    return () => clearTimeout(t);
+  }, [sleepTimerEndMs]);
+
   // Poll playback state + scrobbling + smart queue refill
   useEffect(() => {
     if (!session.logged_in) return;
@@ -47,6 +60,8 @@ export default function App() {
     const lastEnqueuedForRef = { trackId: null as string | null };
 
     const interval = setInterval(async () => {
+      // Don't overwrite position while user is dragging the seek bar
+      if (useStore.getState().isSeeking) return;
       try {
         const state = await api.getPlaybackState();
 
@@ -140,20 +155,20 @@ export default function App() {
         `,
       }}
     >
-      {/* Login gate */}
-      {!session.logged_in && <LoginModal />}
-
-      {/* Main layout */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <Sidebar />
-
-        {/* Content */}
-        <MainContent />
-      </div>
-
-      {/* Player bar */}
-      <PlayerBar />
+      {!session.logged_in ? (
+        /* Login gate — don't render main content until authenticated */
+        <LoginModal />
+      ) : (
+        <>
+          {/* Main layout */}
+          <div className="flex flex-1 overflow-hidden">
+            <Sidebar />
+            <MainContent />
+          </div>
+          {/* Player bar */}
+          <PlayerBar />
+        </>
+      )}
     </div>
   );
 }

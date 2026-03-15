@@ -13,7 +13,16 @@ import type {
   LastFmUserSession,
   UnifiedTrack,
   SearchHistoryEntry,
+  EqBand,
 } from "./types";
+
+const DEFAULT_EQ_BANDS: EqBand[] = [
+  { freq: 60,    gain: 0, q: 0.9, label: "Bass"     },
+  { freq: 250,   gain: 0, q: 1.0, label: "Low Mid"  },
+  { freq: 1000,  gain: 0, q: 1.0, label: "Mid"      },
+  { freq: 4000,  gain: 0, q: 1.0, label: "High Mid" },
+  { freq: 14000, gain: 0, q: 0.9, label: "Treble"   },
+];
 
 interface NavEntry {
   view: ViewType;
@@ -101,6 +110,29 @@ interface AppStore {
   // Last.fm
   lastfmUser: LastFmUserSession | null;
   setLastfmUser: (u: LastFmUserSession | null) => void;
+
+  // Seek lock (suppress polling position updates during active seek)
+  isSeeking: boolean;
+  setIsSeeking: (v: boolean) => void;
+
+  // EQ
+  eqEnabled: boolean;
+  setEqEnabled: (v: boolean) => void;
+  eqBands: EqBand[];
+  updateEqBand: (index: number, gain: number) => void;
+  resetEq: () => void;
+  showEqPanel: boolean;
+  setShowEqPanel: (v: boolean) => void;
+
+  // Audio output device
+  audioDevices: string[];
+  setAudioDevices: (devs: string[]) => void;
+  selectedDevice: string;
+  setSelectedDevice: (dev: string) => void;
+
+  // Sleep timer (end timestamp in ms, null = off)
+  sleepTimerEndMs: number | null;
+  setSleepTimer: (minutes: number | null) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -235,4 +267,32 @@ export const useStore = create<AppStore>((set) => ({
   // Last.fm
   lastfmUser: null,
   setLastfmUser: (lastfmUser) => set({ lastfmUser }),
+
+  // Seek lock
+  isSeeking: false,
+  setIsSeeking: (isSeeking) => set({ isSeeking }),
+
+  // EQ
+  eqEnabled: false,
+  setEqEnabled: (eqEnabled) => set({ eqEnabled }),
+  eqBands: DEFAULT_EQ_BANDS,
+  updateEqBand: (index, gain) => set((state) => {
+    const bands = state.eqBands.map((b, i) => i === index ? { ...b, gain } : b);
+    return { eqBands: bands };
+  }),
+  resetEq: () => set({ eqBands: DEFAULT_EQ_BANDS }),
+  showEqPanel: false,
+  setShowEqPanel: (showEqPanel) => set({ showEqPanel }),
+
+  // Audio output device
+  audioDevices: ["Default"],
+  setAudioDevices: (audioDevices) => set({ audioDevices }),
+  selectedDevice: "Default",
+  setSelectedDevice: (selectedDevice) => set({ selectedDevice }),
+
+  // Sleep timer
+  sleepTimerEndMs: null,
+  setSleepTimer: (minutes) => set({
+    sleepTimerEndMs: minutes ? Date.now() + minutes * 60 * 1000 : null,
+  }),
 }));

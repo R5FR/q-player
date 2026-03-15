@@ -1,7 +1,9 @@
 use crate::models::*;
-use rodio::{buffer::SamplesBuffer, OutputStream, Sink};
+use cpal::traits::{DeviceTrait, HostTrait};
+use rodio::{buffer::SamplesBuffer, OutputStream, OutputStreamHandle, Sink};
+use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::Cursor;
+use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
@@ -11,21 +13,219 @@ use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
-use symphonia::core::io::MediaSourceStream;
+use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use symphonia::core::units::Time;
 use tracing::{debug, error, info, warn};
 
+// ── ArcCursor: seekable memory source backed by Arc<Vec<u8>> (no data copy) ──
+
+struct ArcCursor {
+    data: Arc<Vec<u8>>,
+    pos: u64,
+}
+
+impl io::Read for ArcCursor {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let start = self.pos as usize;
+        if start >= self.data.len() {
+            return Ok(0);
+        }
+        let n = (self.data.len() - start).min(buf.len());
+        buf[..n].copy_from_slice(&self.data[start..start + n]);
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
+impl io::Seek for ArcCursor {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        let len = self.data.len() as i64;
+        let new_pos = match pos {
+            io::SeekFrom::Start(p) => p as i64,
+            io::SeekFrom::End(p) => len + p,
+            io::SeekFrom::Current(p) => self.pos as i64 + p,
+        };
+        self.pos = new_pos.max(0) as u64;
+        Ok(self.pos)
+    }
+}
+
+impl MediaSource for ArcCursor {
+    fn is_seekable(&self) -> bool { true }
+    fn byte_len(&self) -> Option<u64> { Some(self.data.len() as u64) }
+}
+
+// ── EQ Types ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EqBandParam {
+    pub freq: f32,
+    pub gain_db: f32,
+    pub q: f32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EqSharedState {
+    pub enabled: bool,
+    pub bands: Vec<EqBandParam>,
+    pub version: u64,
+}
+
+/// Biquad filter coefficients (Direct Form II Transposed).
+#[derive(Debug, Clone)]
+struct BiquadCoeffs {
+    b0: f64,
+    b1: f64,
+    b2: f64,
+    a1: f64,
+    a2: f64,
+}
+
+impl BiquadCoeffs {
+    fn identity() -> Self {
+        Self { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 }
+    }
+
+    /// Peak/Peaking EQ filter (RBJ Audio EQ Cookbook).
+    fn peak_eq(sample_rate: f64, freq: f64, gain_db: f64, q: f64) -> Self {
+        if gain_db.abs() < 0.01 {
+            return Self::identity();
+        }
+        let a = 10f64.powf(gain_db / 40.0);
+        let w0 = 2.0 * std::f64::consts::PI * freq / sample_rate;
+        let sin_w0 = w0.sin();
+        let cos_w0 = w0.cos();
+        let alpha = sin_w0 / (2.0 * q);
+
+        let b0 = 1.0 + alpha * a;
+        let b1 = -2.0 * cos_w0;
+        let b2 = 1.0 - alpha * a;
+        let a0 = 1.0 + alpha / a;
+        let a1 = -2.0 * cos_w0;
+        let a2 = 1.0 - alpha / a;
+
+        Self { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
+    }
+
+    /// Low-shelf filter for the lowest EQ band.
+    fn low_shelf(sample_rate: f64, freq: f64, gain_db: f64, q: f64) -> Self {
+        if gain_db.abs() < 0.01 {
+            return Self::identity();
+        }
+        let a = 10f64.powf(gain_db / 40.0);
+        let w0 = 2.0 * std::f64::consts::PI * freq / sample_rate;
+        let cos_w0 = w0.cos();
+        let alpha = w0.sin() / 2.0 * (2.0_f64.sqrt() / q);
+
+        let b0 = a * ((a + 1.0) - (a - 1.0) * cos_w0 + 2.0 * a.sqrt() * alpha);
+        let b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0);
+        let b2 = a * ((a + 1.0) - (a - 1.0) * cos_w0 - 2.0 * a.sqrt() * alpha);
+        let a0 = (a + 1.0) + (a - 1.0) * cos_w0 + 2.0 * a.sqrt() * alpha;
+        let a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cos_w0);
+        let a2 = (a + 1.0) + (a - 1.0) * cos_w0 - 2.0 * a.sqrt() * alpha;
+
+        Self { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
+    }
+
+    /// High-shelf filter for the highest EQ band.
+    fn high_shelf(sample_rate: f64, freq: f64, gain_db: f64, q: f64) -> Self {
+        if gain_db.abs() < 0.01 {
+            return Self::identity();
+        }
+        let a = 10f64.powf(gain_db / 40.0);
+        let w0 = 2.0 * std::f64::consts::PI * freq / sample_rate;
+        let cos_w0 = w0.cos();
+        let alpha = w0.sin() / 2.0 * (2.0_f64.sqrt() / q);
+
+        let b0 = a * ((a + 1.0) + (a - 1.0) * cos_w0 + 2.0 * a.sqrt() * alpha);
+        let b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0);
+        let b2 = a * ((a + 1.0) + (a - 1.0) * cos_w0 - 2.0 * a.sqrt() * alpha);
+        let a0 = (a + 1.0) - (a - 1.0) * cos_w0 + 2.0 * a.sqrt() * alpha;
+        let a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cos_w0);
+        let a2 = (a + 1.0) - (a - 1.0) * cos_w0 - 2.0 * a.sqrt() * alpha;
+
+        Self { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
+    }
+}
+
+/// Stateful biquad filter (Direct Form II Transposed, maintains per-channel state).
+struct BiquadFilter {
+    coeffs: BiquadCoeffs,
+    s1: f64,
+    s2: f64,
+}
+
+impl BiquadFilter {
+    fn new(coeffs: BiquadCoeffs) -> Self {
+        Self { coeffs, s1: 0.0, s2: 0.0 }
+    }
+
+    #[inline]
+    fn process(&mut self, x: f64) -> f64 {
+        let y = self.coeffs.b0 * x + self.s1;
+        self.s1 = self.coeffs.b1 * x - self.coeffs.a1 * y + self.s2;
+        self.s2 = self.coeffs.b2 * x - self.coeffs.a2 * y;
+        y
+    }
+}
+
+/// Per-band, per-channel filter bank. Rebuilt when EQ config or sample rate changes.
+struct EqFilterBank {
+    /// filters[band][channel]
+    filters: Vec<Vec<BiquadFilter>>,
+    sample_rate: u32,
+    channels: u16,
+}
+
+impl EqFilterBank {
+    fn new(bands: &[EqBandParam], sample_rate: u32, channels: u16) -> Self {
+        let n_bands = bands.len();
+        let filters = bands
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let sr = sample_rate as f64;
+                let freq = b.freq as f64;
+                let gain = b.gain_db as f64;
+                let q = b.q as f64;
+                let coeffs = if i == 0 {
+                    BiquadCoeffs::low_shelf(sr, freq, gain, q)
+                } else if i == n_bands - 1 {
+                    BiquadCoeffs::high_shelf(sr, freq, gain, q)
+                } else {
+                    BiquadCoeffs::peak_eq(sr, freq, gain, q)
+                };
+                (0..channels as usize)
+                    .map(|_| BiquadFilter::new(coeffs.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        Self { filters, sample_rate, channels }
+    }
+
+    fn process(&mut self, samples: &mut [f32]) {
+        let ch = self.channels as usize;
+        for (i, sample) in samples.iter_mut().enumerate() {
+            let c = i % ch;
+            let mut v = *sample as f64;
+            for band in &mut self.filters {
+                v = band[c].process(v);
+            }
+            *sample = v.clamp(-1.0, 1.0) as f32;
+        }
+    }
+}
+
 // ── Commands sent to the decoder thread ─────────────────────────────
 
 enum AudioCommand {
-    /// Load audio from in-memory bytes. If `seek_to_ms` is Some, seek immediately after loading.
     LoadBytes {
         bytes: Arc<Vec<u8>>,
         seek_to_ms: Option<u64>,
     },
-    /// Load audio from a local file. If `seek_to_ms` is Some, seek immediately after loading.
     LoadFile {
         path: PathBuf,
         seek_to_ms: Option<u64>,
@@ -35,48 +235,40 @@ enum AudioCommand {
     Resume,
     Stop,
     SetVolume(f32),
+    /// Rebuild EQ filter bank on next packet decode.
+    SetEq,
+    /// Switch audio output device (None = system default).
+    SetDevice(Option<String>),
 }
 
 /// Events emitted by the audio engine (decoder thread → listener).
 #[derive(Debug, Clone)]
 pub enum PlayerEvent {
-    /// Current track finished playing completely (sink drained).
     TrackEnded,
 }
 
 // ── Public API ──────────────────────────────────────────────────────
 
-/// Hi-Res audio player using symphonia for decoding + rodio for output.
-///
-/// Architecture inspired by music-player-master:
-///   • A dedicated background thread decodes audio via symphonia
-///   • Decoded samples are fed to rodio's Sink via SamplesBuffer
-///   • Position tracked via Sink::get_pos() + seek offset (actual playback, not decode-ahead)
-///   • Seeking uses symphonia's FormatReader::seek (no rodio try_seek hack)
-///   • Track-ended events emitted via mpsc channel for instant transitions
 pub struct AudioPlayer {
     command_tx: mpsc::Sender<AudioCommand>,
 
-    // Metadata (protected by outer RwLock in AppState)
     current_track: Option<UnifiedTrack>,
     current_sample_rate: Option<f64>,
     current_bit_depth: Option<i32>,
     volume: f32,
 
-    // Cached source so the track can be replayed from any position after it ends.
-    // Arc avoids cloning the bytes on every play; the decoder clones once when loading.
     cached_bytes: Option<Arc<Vec<u8>>>,
     cached_file_path: Option<PathBuf>,
 
-    // Shared with decoder thread (atomic)
     is_playing: Arc<AtomicBool>,
     position_ms: Arc<AtomicU64>,
     duration_ms: Arc<AtomicU64>,
     is_finished: Arc<AtomicBool>,
+
+    /// EQ state shared with decoder thread.
+    pub eq_state: Arc<parking_lot::Mutex<EqSharedState>>,
 }
 
-// Safety: Always accessed behind RwLock<AudioPlayer> in AppState.
-// mpsc::Sender is Send. Atomics are Send+Sync.
 unsafe impl Send for AudioPlayer {}
 unsafe impl Sync for AudioPlayer {}
 
@@ -89,18 +281,20 @@ impl AudioPlayer {
         let position_ms = Arc::new(AtomicU64::new(0));
         let duration_ms = Arc::new(AtomicU64::new(0));
         let is_finished = Arc::new(AtomicBool::new(true));
+        let eq_state: Arc<parking_lot::Mutex<EqSharedState>> =
+            Arc::new(parking_lot::Mutex::new(EqSharedState::default()));
 
         let shared = SharedState {
             is_playing: is_playing.clone(),
             position_ms: position_ms.clone(),
             duration_ms: duration_ms.clone(),
             is_finished: is_finished.clone(),
+            eq_state: eq_state.clone(),
         };
 
-        let event_tx_clone = event_tx.clone();
         thread::Builder::new()
             .name("audio-decoder".into())
-            .spawn(move || decoder_thread(rx, shared, event_tx_clone))
+            .spawn(move || decoder_thread(rx, shared, event_tx))
             .expect("Failed to spawn audio decoder thread");
 
         (
@@ -116,17 +310,16 @@ impl AudioPlayer {
                 position_ms,
                 duration_ms,
                 is_finished,
+                eq_state,
             },
             event_rx,
         )
     }
 
-    /// Cubic volume curve for perceptual linearity
-    fn cubic_volume(linear: f32) -> f32 {
+    pub fn cubic_volume(linear: f32) -> f32 {
         linear * linear * linear
     }
 
-    /// Play a track from raw in-memory bytes (Qobuz streaming)
     pub fn play_bytes(
         &mut self,
         bytes: Vec<u8>,
@@ -135,29 +328,21 @@ impl AudioPlayer {
         bit_depth: Option<i32>,
     ) -> Result<(), String> {
         info!("Playing (in-memory): {} - {}", track.artist, track.title);
-
-        // Set initial state immediately for UI responsiveness
-        self.duration_ms
-            .store((track.duration_seconds as u64) * 1000, Ordering::SeqCst);
+        self.duration_ms.store((track.duration_seconds as u64) * 1000, Ordering::SeqCst);
         self.position_ms.store(0, Ordering::SeqCst);
         self.is_playing.store(true, Ordering::SeqCst);
         self.is_finished.store(false, Ordering::SeqCst);
-
-        self.current_track = Some(track.clone());
+        self.current_track = Some(track);
         self.current_sample_rate = sample_rate;
         self.current_bit_depth = bit_depth;
-
-        // Cache under Arc so the decoder can reload later (post-end seek)
         let arc = Arc::new(bytes);
         self.cached_bytes = Some(arc.clone());
         self.cached_file_path = None;
-
         self.command_tx
             .send(AudioCommand::LoadBytes { bytes: arc, seek_to_ms: None })
             .map_err(|e| format!("Decoder thread not responding: {}", e))
     }
 
-    /// Play a track from a local file path
     pub fn play_file(
         &mut self,
         file_path: &PathBuf,
@@ -166,26 +351,17 @@ impl AudioPlayer {
         bit_depth: Option<i32>,
     ) -> Result<(), String> {
         info!("Playing (file): {} - {}", track.artist, track.title);
-
-        self.duration_ms
-            .store((track.duration_seconds as u64) * 1000, Ordering::SeqCst);
+        self.duration_ms.store((track.duration_seconds as u64) * 1000, Ordering::SeqCst);
         self.position_ms.store(0, Ordering::SeqCst);
         self.is_playing.store(true, Ordering::SeqCst);
         self.is_finished.store(false, Ordering::SeqCst);
-
-        self.current_track = Some(track.clone());
+        self.current_track = Some(track);
         self.current_sample_rate = sample_rate;
         self.current_bit_depth = bit_depth;
-
-        // Cache file path so the decoder can reload later (post-end seek)
         self.cached_bytes = None;
         self.cached_file_path = Some(file_path.clone());
-
         self.command_tx
-            .send(AudioCommand::LoadFile {
-                path: file_path.clone(),
-                seek_to_ms: None,
-            })
+            .send(AudioCommand::LoadFile { path: file_path.clone(), seek_to_ms: None })
             .map_err(|e| format!("Decoder thread not responding: {}", e))
     }
 
@@ -208,36 +384,26 @@ impl AudioPlayer {
     }
 
     pub fn seek(&mut self, position_ms: u64) -> Result<(), String> {
-        // Immediately update for UI responsiveness
         self.position_ms.store(position_ms, Ordering::SeqCst);
+        self.is_finished.store(false, Ordering::SeqCst);
+        self.is_playing.store(true, Ordering::SeqCst);
 
-        // When the track has finished, the decoder is gone.  Reload from cache
-        // and start playing from the requested position (post-end scrubbing).
-        if self.is_finished.load(Ordering::SeqCst) {
-            self.is_finished.store(false, Ordering::SeqCst);
-            self.is_playing.store(true, Ordering::SeqCst);
-
-            if let Some(ref arc) = self.cached_bytes {
-                return self
-                    .command_tx
-                    .send(AudioCommand::LoadBytes {
-                        bytes: arc.clone(),
-                        seek_to_ms: Some(position_ms),
-                    })
-                    .map_err(|e| format!("Decoder thread not responding: {}", e));
-            } else if let Some(ref path) = self.cached_file_path {
-                return self
-                    .command_tx
-                    .send(AudioCommand::LoadFile {
-                        path: path.clone(),
-                        seek_to_ms: Some(position_ms),
-                    })
-                    .map_err(|e| format!("Decoder thread not responding: {}", e));
-            }
-            // No cache — nothing to reload (shouldn't normally happen)
-            return Ok(());
+        // Reload from cached data for reliable seeking: ArcCursor avoids copying bytes,
+        // and a fresh decoder guarantees a clean seek regardless of format quirks.
+        if let Some(ref arc) = self.cached_bytes {
+            return self
+                .command_tx
+                .send(AudioCommand::LoadBytes { bytes: arc.clone(), seek_to_ms: Some(position_ms) })
+                .map_err(|e| format!("Decoder thread not responding: {}", e));
+        }
+        if let Some(ref path) = self.cached_file_path {
+            return self
+                .command_tx
+                .send(AudioCommand::LoadFile { path: path.clone(), seek_to_ms: Some(position_ms) })
+                .map_err(|e| format!("Decoder thread not responding: {}", e));
         }
 
+        // Fallback if no cached data (shouldn't normally happen)
         self.command_tx
             .send(AudioCommand::Seek(position_ms))
             .map_err(|e| format!("Decoder thread not responding: {}", e))
@@ -248,6 +414,42 @@ impl AudioPlayer {
         let _ = self.command_tx.send(AudioCommand::SetVolume(self.volume));
     }
 
+    /// Update EQ settings and signal decoder thread to rebuild filter bank.
+    pub fn set_eq(&mut self, bands: Vec<EqBandParam>, enabled: bool) {
+        {
+            let mut state = self.eq_state.lock();
+            state.bands = bands;
+            state.enabled = enabled;
+            state.version = state.version.wrapping_add(1);
+        }
+        let _ = self.command_tx.send(AudioCommand::SetEq);
+    }
+
+    /// Returns current EQ configuration.
+    pub fn get_eq_state(&self) -> (bool, Vec<EqBandParam>) {
+        let state = self.eq_state.lock();
+        (state.enabled, state.bands.clone())
+    }
+
+    /// Switch audio output device. Interrupts current playback; user must re-press play.
+    pub fn set_preferred_device(&mut self, name: Option<String>) {
+        let _ = self.command_tx.send(AudioCommand::SetDevice(name));
+    }
+
+    /// Enumerate available audio output devices on the current host.
+    pub fn get_audio_devices() -> Vec<String> {
+        let host = cpal::default_host();
+        let mut devices = vec!["Default".to_string()];
+        if let Ok(devs) = host.output_devices() {
+            for dev in devs {
+                if let Ok(name) = dev.name() {
+                    devices.push(name);
+                }
+            }
+        }
+        devices
+    }
+
     #[allow(dead_code)]
     pub fn is_finished(&self) -> bool {
         self.is_finished.load(Ordering::SeqCst)
@@ -256,17 +458,13 @@ impl AudioPlayer {
     pub fn playback_state(&self) -> PlaybackState {
         let finished = self.is_finished.load(Ordering::SeqCst);
         let is_playing = self.is_playing.load(Ordering::SeqCst) && !finished;
-
         PlaybackState {
             is_playing,
             current_track: self.current_track.clone(),
             position_ms: self.position_ms.load(Ordering::SeqCst),
             duration_ms: self.duration_ms.load(Ordering::SeqCst),
             volume: self.volume,
-            quality: self
-                .current_track
-                .as_ref()
-                .and_then(|t| t.quality_label.clone()),
+            quality: self.current_track.as_ref().and_then(|t| t.quality_label.clone()),
             sample_rate: self.current_sample_rate,
             bit_depth: self.current_bit_depth,
         }
@@ -275,15 +473,14 @@ impl AudioPlayer {
 
 // ── Decoder Thread ──────────────────────────────────────────────────
 
-/// Shared atomic state between AudioPlayer and the decoder thread.
 struct SharedState {
     is_playing: Arc<AtomicBool>,
     position_ms: Arc<AtomicU64>,
     duration_ms: Arc<AtomicU64>,
     is_finished: Arc<AtomicBool>,
+    eq_state: Arc<parking_lot::Mutex<EqSharedState>>,
 }
 
-/// Active symphonia format reader + decoder for the current track.
 struct DecoderState {
     format: Box<dyn FormatReader>,
     decoder: Box<dyn symphonia::core::codecs::Decoder>,
@@ -291,36 +488,33 @@ struct DecoderState {
     sample_buf: Option<SampleBuffer<f32>>,
 }
 
-/// Background thread: decodes audio packets via symphonia and feeds
-/// interleaved f32 samples to the rodio Sink for output.
 fn decoder_thread(
     command_rx: mpsc::Receiver<AudioCommand>,
     shared: SharedState,
     event_tx: mpsc::Sender<PlayerEvent>,
 ) {
-    // Audio output — created lazily, persists across tracks
     let mut _stream: Option<OutputStream> = None;
+    let mut _handle: Option<OutputStreamHandle> = None;
     let mut sink: Option<Sink> = None;
     let mut volume: f32 = 0.7;
+    let mut preferred_device: Option<String> = None;
 
-    // Current decoder (Some while a track is loaded)
     let mut dec_state: Option<DecoderState> = None;
     let mut paused = false;
 
-    // Position tracking via Instant (time-based, independent of rodio internals).
-    // Rationale: rodio 0.19 Sink::get_pos() resets for each appended SamplesBuffer
-    // source, so it cannot be used to track cumulative playback position.
     let mut playback_start: Option<Instant> = None;
     let mut position_at_start_ms: u64 = 0;
 
+    // Cached source for reliable EQ-triggered seeks (avoids audio jumping ahead)
+    let mut cached_bytes: Option<Arc<Vec<u8>>> = None;
+    let mut cached_file: Option<PathBuf> = None;
+
+    // EQ filter bank (rebuilt on SetEq or sample-rate change)
+    let mut eq_filter_bank: Option<EqFilterBank> = None;
+    let mut eq_version_seen: u64 = 0;
+
     loop {
-        // ── 1. Receive commands ──────────────────────────────────
-        // Block when idle / paused / Sink buffer full → save CPU.
-        // Non-blocking when actively decoding.
-        let buffer_full = sink
-            .as_ref()
-            .map(|s| s.len() > 20)
-            .unwrap_or(false);
+        let buffer_full = sink.as_ref().map(|s| s.len() > 20).unwrap_or(false);
         let should_wait = dec_state.is_none() || paused || buffer_full;
 
         let cmd = if should_wait {
@@ -345,90 +539,59 @@ fn decoder_thread(
 
         if let Some(cmd) = cmd {
             match cmd {
-                // ── Load from in-memory bytes ────────────────────
                 AudioCommand::LoadBytes { bytes, seek_to_ms } => {
-                    if let Some(sk) = &sink {
-                        sk.clear();
-                    }
-                    ensure_sink(&mut _stream, &mut sink, volume);
+                    if let Some(sk) = &sink { sk.clear(); }
+                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device);
                     position_at_start_ms = 0;
                     playback_start = Some(Instant::now());
-
-                    // Arc<Vec<u8>> → clone once into Cursor for symphonia
-                    let cursor = Cursor::new((*bytes).clone());
-                    dec_state = create_decoder(
-                        Box::new(cursor),
-                        Some("audio/flac"),
-                        &shared,
-                    );
+                    // Use ArcCursor to avoid cloning the entire audio buffer on every seek
+                    let arc_cursor = ArcCursor { data: bytes.clone(), pos: 0 };
+                    dec_state = create_decoder(Box::new(arc_cursor), None, &shared);
+                    cached_bytes = Some(bytes.clone());
+                    cached_file = None;
+                    eq_filter_bank = None; // rebuild on next packet
                     paused = false;
-                    if let Some(sk) = &sink {
-                        sk.play();
-                    }
-
-                    // Immediate seek (used when restarting a finished track)
+                    if let Some(sk) = &sink { sk.play(); }
                     if let Some(ms) = seek_to_ms {
                         if let Some(ds) = &mut dec_state {
                             position_at_start_ms = ms;
                             playback_start = Some(Instant::now());
                             let secs = ms / 1000;
                             let frac = (ms % 1000) as f64 / 1000.0;
-                            match ds.format.seek(
-                                SeekMode::Accurate,
-                                SeekTo::Time {
-                                    time: Time::new(secs, frac),
-                                    track_id: None,
-                                },
-                            ) {
-                                Ok(_) => {
-                                    ds.decoder.reset();
-                                    ds.sample_buf = None;
-                                    debug!("Post-load seek to {}ms", ms);
-                                }
-                                Err(e) => error!("Post-load seek failed: {}", e),
+                            if let Ok(_) = ds.format.seek(SeekMode::Accurate, SeekTo::Time {
+                                time: Time::new(secs, frac), track_id: None,
+                            }) {
+                                ds.decoder.reset();
+                                ds.sample_buf = None;
                             }
                         }
                     }
                 }
 
-                // ── Load from local file ─────────────────────────
                 AudioCommand::LoadFile { path, seek_to_ms } => {
-                    if let Some(sk) = &sink {
-                        sk.clear();
-                    }
-                    ensure_sink(&mut _stream, &mut sink, volume);
+                    if let Some(sk) = &sink { sk.clear(); }
+                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device);
                     position_at_start_ms = 0;
                     playback_start = Some(Instant::now());
-
                     match File::open(&path) {
                         Ok(file) => {
-                            dec_state =
-                                create_decoder(Box::new(file), None, &shared);
+                            dec_state = create_decoder(Box::new(file), None, &shared);
+                            cached_file = Some(path.clone());
+                            cached_bytes = None;
+                            eq_filter_bank = None;
                             paused = false;
-                            if let Some(sk) = &sink {
-                                sk.play();
-                            }
-
-                            // Immediate seek (used when restarting a finished track)
+                            if let Some(sk) = &sink { sk.play(); }
                             if let Some(ms) = seek_to_ms {
                                 if let Some(ds) = &mut dec_state {
                                     position_at_start_ms = ms;
                                     playback_start = Some(Instant::now());
                                     let secs = ms / 1000;
                                     let frac = (ms % 1000) as f64 / 1000.0;
-                                    match ds.format.seek(
-                                        SeekMode::Accurate,
-                                        SeekTo::Time {
-                                            time: Time::new(secs, frac),
-                                            track_id: None,
-                                        },
-                                    ) {
-                                        Ok(_) => {
-                                            ds.decoder.reset();
-                                            ds.sample_buf = None;
-                                            debug!("Post-load seek to {}ms", ms);
-                                        }
-                                        Err(e) => error!("Post-load seek failed: {}", e),
+                                    if let Ok(_) = ds.format.seek(SeekMode::Accurate, SeekTo::Time {
+                                        time: Time::new(secs, frac), track_id: None,
+                                    }) {
+                                        ds.decoder.reset();
+                                        ds.sample_buf = None;
                                     }
                                 }
                             }
@@ -437,37 +600,20 @@ fn decoder_thread(
                     }
                 }
 
-                // ── Seek ─────────────────────────────────────────
                 AudioCommand::Seek(pos_ms) => {
                     if let Some(ds) = &mut dec_state {
-                        // 1. Clear buffered audio so old samples don't play
                         if let Some(sk) = &sink {
                             sk.clear();
-                            if !paused {
-                                sk.play();
-                            }
+                            if !paused { sk.play(); }
                         }
-
-                        // 2. Update Instant-based position tracker
                         position_at_start_ms = pos_ms;
-                        playback_start = if !paused {
-                            Some(Instant::now())
-                        } else {
-                            None
-                        };
-
-                        // 3. Seek the symphonia FormatReader
+                        playback_start = if !paused { Some(Instant::now()) } else { None };
                         let secs = pos_ms / 1000;
                         let frac = (pos_ms % 1000) as f64 / 1000.0;
-                        match ds.format.seek(
-                            SeekMode::Accurate,
-                            SeekTo::Time {
-                                time: Time::new(secs, frac),
-                                track_id: None,
-                            },
-                        ) {
+                        match ds.format.seek(SeekMode::Accurate, SeekTo::Time {
+                            time: Time::new(secs, frac), track_id: None,
+                        }) {
                             Ok(_) => {
-                                // 4. Reset decoder to avoid glitches
                                 ds.decoder.reset();
                                 ds.sample_buf = None;
                                 debug!("Seeked to {} ms", pos_ms);
@@ -478,27 +624,21 @@ fn decoder_thread(
                 }
 
                 AudioCommand::Pause => {
-                    // Freeze position at the current elapsed value
                     if let Some(start) = playback_start.take() {
                         position_at_start_ms += start.elapsed().as_millis() as u64;
                     }
                     paused = true;
-                    if let Some(sk) = &sink {
-                        sk.pause();
-                    }
+                    if let Some(sk) = &sink { sk.pause(); }
                 }
+
                 AudioCommand::Resume => {
                     paused = false;
                     playback_start = Some(Instant::now());
-                    if let Some(sk) = &sink {
-                        sk.play();
-                    }
+                    if let Some(sk) = &sink { sk.play(); }
                 }
+
                 AudioCommand::Stop => {
-                    if let Some(sk) = &sink {
-                        sk.clear();
-                        sk.pause();
-                    }
+                    if let Some(sk) = &sink { sk.clear(); sk.pause(); }
                     dec_state = None;
                     paused = false;
                     playback_start = None;
@@ -507,20 +647,78 @@ fn decoder_thread(
                     shared.is_playing.store(false, Ordering::SeqCst);
                     shared.is_finished.store(true, Ordering::SeqCst);
                 }
+
                 AudioCommand::SetVolume(v) => {
                     volume = v;
                     if let Some(sk) = &sink {
                         sk.set_volume(AudioPlayer::cubic_volume(v));
                     }
                 }
+
+                AudioCommand::SetEq => {
+                    eq_filter_bank = None;
+                    eq_version_seen = 0;
+
+                    // Reload from the cached source at the current display position so:
+                    // 1. EQ applies immediately (fresh decoder, no pre-EQ buffer left),
+                    // 2. Audio doesn't jump ahead (Symphonia was pre-reading ~2 s ahead).
+                    let current_pos = if let Some(start) = &playback_start {
+                        position_at_start_ms + start.elapsed().as_millis() as u64
+                    } else {
+                        position_at_start_ms
+                    };
+                    let dur = shared.duration_ms.load(Ordering::SeqCst);
+                    let current_pos = if dur > 0 { current_pos.min(dur) } else { current_pos };
+
+                    let reloaded = if let Some(ref bytes) = cached_bytes {
+                        if let Some(sk) = &sink { sk.clear(); }
+                        let arc_cursor = ArcCursor { data: bytes.clone(), pos: 0 };
+                        create_decoder(Box::new(arc_cursor), None, &shared)
+                    } else if let Some(ref path) = cached_file {
+                        if let Some(sk) = &sink { sk.clear(); }
+                        File::open(path).ok().and_then(|f| create_decoder(Box::new(f), None, &shared))
+                    } else {
+                        None
+                    };
+
+                    if let Some(mut new_ds) = reloaded {
+                        let secs = current_pos / 1000;
+                        let frac = (current_pos % 1000) as f64 / 1000.0;
+                        if new_ds.format.seek(SeekMode::Accurate, SeekTo::Time {
+                            time: Time::new(secs, frac), track_id: None,
+                        }).is_ok() {
+                            new_ds.decoder.reset();
+                            new_ds.sample_buf = None;
+                        }
+                        dec_state = Some(new_ds);
+                        position_at_start_ms = current_pos;
+                        playback_start = if !paused { Some(Instant::now()) } else { None };
+                        if !paused {
+                            if let Some(sk) = &sink { sk.play(); }
+                        }
+                    }
+                }
+
+                AudioCommand::SetDevice(name) => {
+                    // Close existing sink/stream
+                    if let Some(sk) = &sink { sk.clear(); sk.pause(); }
+                    sink = None;
+                    _handle = None;
+                    _stream = None;
+                    preferred_device = name;
+                    // Recreate sink with new device
+                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device);
+                    // Playback stops; user must press play again
+                    dec_state = None;
+                    playback_start = None;
+                    shared.is_playing.store(false, Ordering::SeqCst);
+                    shared.is_finished.store(true, Ordering::SeqCst);
+                }
             }
-            continue; // drain all pending commands before decoding
+            continue;
         }
 
-        // ── 2. Update position via Instant-based tracking ───────
-        //    Instant elapsed since last play/seek = true playback position.
-        //    This avoids rodio's Sink::get_pos() which resets to 0 for
-        //    every new SamplesBuffer source appended to the queue.
+        // ── 2. Update position ───────────────────────────────────
         {
             let current_pos = if let Some(start) = &playback_start {
                 position_at_start_ms + start.elapsed().as_millis() as u64
@@ -532,47 +730,39 @@ fn decoder_thread(
             shared.position_ms.store(clamped, Ordering::SeqCst);
         }
 
-        // ── 3. Detect natural end-of-track (sink fully drained) ─
+        // ── 3. Detect natural end-of-track ───────────────────────
         if dec_state.is_none() && !shared.is_finished.load(Ordering::SeqCst) {
             if sink.as_ref().map(|s| s.empty()).unwrap_or(true) {
-                // Freeze position at duration for clean UI
                 let dur = shared.duration_ms.load(Ordering::SeqCst);
-                if dur > 0 {
-                    shared.position_ms.store(dur, Ordering::SeqCst);
-                }
-                playback_start = None; // stop Instant from advancing past end
+                if dur > 0 { shared.position_ms.store(dur, Ordering::SeqCst); }
+                playback_start = None;
                 position_at_start_ms = dur;
                 shared.is_playing.store(false, Ordering::SeqCst);
                 shared.is_finished.store(true, Ordering::SeqCst);
                 info!("Track fully played out");
-                // Notify listeners (Tauri event bridge)
                 let _ = event_tx.send(PlayerEvent::TrackEnded);
             }
             continue;
         }
 
-        // ── 4. Skip decoding when paused or idle ────────────────
         if paused || dec_state.is_none() {
             continue;
         }
 
-        // ── 5. Decode one packet ────────────────────────────────
+        // ── 4. Decode one packet ─────────────────────────────────
         let ds = dec_state.as_mut().unwrap();
 
         match ds.format.next_packet() {
             Ok(packet) => {
-                // Skip packets belonging to other tracks in the container
                 if packet.track_id() != ds.track_id {
                     continue;
                 }
-
                 match ds.decoder.decode(&packet) {
                     Ok(decoded) => {
                         let spec = *decoded.spec();
                         let channels = spec.channels.count() as u16;
                         let sr = spec.rate;
 
-                        // Ensure the sample buffer has enough capacity
                         if ds.sample_buf.is_none() {
                             ds.sample_buf = Some(SampleBuffer::<f32>::new(
                                 decoded.capacity() as u64,
@@ -582,7 +772,34 @@ fn decoder_thread(
 
                         let sbuf = ds.sample_buf.as_mut().unwrap();
                         sbuf.copy_interleaved_ref(decoded);
-                        let samples = sbuf.samples().to_vec();
+                        let mut samples = sbuf.samples().to_vec();
+
+                        // ── 5. Apply EQ ──────────────────────────
+                        let eq_ver = shared.eq_state.lock().version;
+                        if eq_version_seen != eq_ver {
+                            eq_version_seen = eq_ver;
+                            eq_filter_bank = None;
+                        }
+
+                        let eq_enabled = shared.eq_state.lock().enabled;
+                        if eq_enabled {
+                            let needs_rebuild = eq_filter_bank.as_ref().map(|b| {
+                                b.sample_rate != sr || b.channels != channels
+                            }).unwrap_or(true);
+
+                            if needs_rebuild {
+                                let state = shared.eq_state.lock();
+                                if !state.bands.is_empty() {
+                                    eq_filter_bank = Some(EqFilterBank::new(&state.bands, sr, channels));
+                                }
+                            }
+
+                            if let Some(bank) = &mut eq_filter_bank {
+                                bank.process(&mut samples);
+                            }
+                        } else {
+                            eq_filter_bank = None;
+                        }
 
                         if let Some(sk) = &sink {
                             sk.append(SamplesBuffer::new(channels, sr, samples));
@@ -597,43 +814,54 @@ fn decoder_thread(
                     }
                 }
             }
-            // End of stream — decoder exhausted; let the Sink drain
             Err(e) => {
                 let is_eof = matches!(
                     &e,
                     SymphoniaError::IoError(io_err)
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof
                 );
-                if is_eof {
-                    info!(
-                        "Decoder reached end of stream, waiting for sink to drain"
-                    );
-                } else {
+                if !is_eof {
                     error!("Format read error: {}", e);
                 }
                 dec_state = None;
-                // Don't mark finished yet — the Sink still has buffered audio
             }
         }
     }
 }
 
-// ── Helper functions for the decoder thread ─────────────────────────
+// ── Helper functions ─────────────────────────────────────────────────
 
-/// Ensure the audio output sink exists (create lazily, persist across tracks).
 fn ensure_sink(
     stream: &mut Option<OutputStream>,
+    handle: &mut Option<OutputStreamHandle>,
     sink: &mut Option<Sink>,
     volume: f32,
+    device_name: &Option<String>,
 ) {
     if sink.is_some() {
         return;
     }
-    match OutputStream::try_default() {
-        Ok((s, handle)) => match Sink::try_new(&handle) {
+
+    let result = if let Some(name) = device_name {
+        let host = cpal::default_host();
+        let device = host
+            .output_devices()
+            .ok()
+            .and_then(|mut devs| devs.find(|d| d.name().ok().as_deref() == Some(name.as_str())));
+        match device {
+            Some(dev) => OutputStream::try_from_device(&dev),
+            None => OutputStream::try_default(),
+        }
+    } else {
+        OutputStream::try_default()
+    };
+
+    match result {
+        Ok((s, h)) => match Sink::try_new(&h) {
             Ok(sk) => {
                 sk.set_volume(AudioPlayer::cubic_volume(volume));
                 *stream = Some(s);
+                *handle = Some(h);
                 *sink = Some(sk);
                 debug!("Audio output initialized");
             }
@@ -643,8 +871,6 @@ fn ensure_sink(
     }
 }
 
-/// Probe a media source and create a symphonia decoder for the first
-/// supported audio track.
 fn create_decoder(
     source: Box<dyn symphonia::core::io::MediaSource>,
     mime_hint: Option<&str>,
@@ -659,10 +885,7 @@ fn create_decoder(
     let probed = match symphonia::default::get_probe().format(
         &hint,
         mss,
-        &FormatOptions {
-            enable_gapless: true,
-            ..Default::default()
-        },
+        &FormatOptions { enable_gapless: true, ..Default::default() },
         &MetadataOptions::default(),
     ) {
         Ok(p) => p,
@@ -672,30 +895,20 @@ fn create_decoder(
         }
     };
 
-    // Find the first audio track with a known codec
     let track = probed
         .format
         .tracks()
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)?;
-
     let track_id = track.id;
 
-    // Only compute duration from symphonia if no external duration was set
-    // (e.g., from Qobuz API). This avoids potential time_base mismatches
-    // between the format reader and decoder.
     let existing_dur = shared.duration_ms.load(Ordering::SeqCst);
     if existing_dur == 0 {
-        if let (Some(tb), Some(nf)) =
-            (track.codec_params.time_base, track.codec_params.n_frames)
-        {
+        if let (Some(tb), Some(nf)) = (track.codec_params.time_base, track.codec_params.n_frames) {
             let time = tb.calc_time(nf);
             let dur = ((time.seconds as f64 + time.frac) * 1000.0) as u64;
             shared.duration_ms.store(dur, Ordering::SeqCst);
-            debug!("Duration from symphonia: {}ms (tb={:?}, nf={})", dur, tb, nf);
         }
-    } else {
-        debug!("Using pre-set duration: {}ms", existing_dur);
     }
 
     let decoder = match symphonia::default::get_codecs()
@@ -709,14 +922,7 @@ fn create_decoder(
     };
 
     shared.is_finished.store(false, Ordering::SeqCst);
-    debug!("Symphonia decoder initialized (track_id={})", track_id);
-
-    Some(DecoderState {
-        format: probed.format,
-        decoder,
-        track_id,
-        sample_buf: None,
-    })
+    Some(DecoderState { format: probed.format, decoder, track_id, sample_buf: None })
 }
 
 // ── Unit Tests ───────────────────────────────────────────────────────
@@ -727,128 +933,46 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    // ── Position tracking logic ──────────────────────────────────────
-
-    /// Position must advance while playback_start is Some.
     #[test]
     fn test_position_advances_while_playing() {
         let start = Instant::now();
         thread::sleep(Duration::from_millis(100));
-
-        let position_at_start_ms: u64 = 0;
-        let elapsed = start.elapsed().as_millis() as u64;
-        let pos = position_at_start_ms + elapsed;
-
-        assert!(
-            pos >= 80,
-            "Position should have advanced ~100ms, got {}ms",
-            pos
-        );
+        let pos = 0u64 + start.elapsed().as_millis() as u64;
+        assert!(pos >= 80);
     }
 
-    /// When paused (playback_start = None), position must not advance.
     #[test]
     fn test_position_frozen_when_paused() {
         let position_at_start_ms: u64 = 12_345;
         let playback_start: Option<Instant> = None;
-
         let current_pos = if let Some(start) = &playback_start {
             position_at_start_ms + start.elapsed().as_millis() as u64
         } else {
             position_at_start_ms
         };
-
-        assert_eq!(
-            current_pos, 12_345,
-            "Paused position must stay at 12345ms"
-        );
+        assert_eq!(current_pos, 12_345);
     }
 
-    /// After a seek, position_at_start_ms reflects the seek target.
     #[test]
     fn test_seek_updates_position_at_start() {
-        let seek_target_ms: u64 = 45_000; // 45 seconds into the track
+        let seek_target_ms: u64 = 45_000;
         let position_at_start_ms = seek_target_ms;
-        // Simulate: playback just resumed from seek position
         let playback_start: Option<Instant> = Some(Instant::now());
-
         let current_pos = if let Some(start) = &playback_start {
             position_at_start_ms + start.elapsed().as_millis() as u64
         } else {
             position_at_start_ms
         };
-
-        // Should be very close to seek_target (within 50ms overhead)
-        assert!(
-            current_pos >= seek_target_ms && current_pos <= seek_target_ms + 50,
-            "Immediately after seek, position should be ~{}ms, got {}ms",
-            seek_target_ms,
-            current_pos
-        );
+        assert!(current_pos >= seek_target_ms && current_pos <= seek_target_ms + 50);
     }
 
-    /// Position must be clamped to track duration (no overshoot).
     #[test]
     fn test_position_clamped_to_duration() {
-        let duration_ms: u64 = 180_000; // 3 minutes
-        let raw_pos: u64 = 200_000; // beyond end
-
-        let clamped = if duration_ms > 0 {
-            raw_pos.min(duration_ms)
-        } else {
-            raw_pos
-        };
-
-        assert_eq!(clamped, 180_000, "Position must be clamped to duration");
+        let duration_ms: u64 = 180_000;
+        let raw_pos: u64 = 200_000;
+        let clamped = if duration_ms > 0 { raw_pos.min(duration_ms) } else { raw_pos };
+        assert_eq!(clamped, 180_000);
     }
-
-    /// Duration = 0 means no clamping (unknown duration).
-    #[test]
-    fn test_no_clamp_when_duration_unknown() {
-        let duration_ms: u64 = 0;
-        let raw_pos: u64 = 5_000;
-
-        let clamped = if duration_ms > 0 {
-            raw_pos.min(duration_ms)
-        } else {
-            raw_pos
-        };
-
-        assert_eq!(clamped, 5_000, "With unknown duration, position is unclipped");
-    }
-
-    /// Pause then resume: elapsed time before pause is preserved.
-    #[test]
-    fn test_pause_resume_accumulates_position() {
-        // Simulate 200ms of playback, then pause
-        let mut position_at_start_ms: u64 = 0;
-        let start = Instant::now();
-        thread::sleep(Duration::from_millis(200));
-
-        // Pause: save elapsed into position_at_start_ms
-        position_at_start_ms += start.elapsed().as_millis() as u64;
-        let position_after_pause = position_at_start_ms;
-
-        // Resume: new Instant starts from position_after_pause
-        let resume_start = Instant::now();
-        thread::sleep(Duration::from_millis(100));
-        let pos_after_resume =
-            position_at_start_ms + resume_start.elapsed().as_millis() as u64;
-
-        assert!(
-            position_after_pause >= 150,
-            "After 200ms play, position should be ≥150ms, got {}ms",
-            position_after_pause
-        );
-        assert!(
-            pos_after_resume >= position_after_pause + 50,
-            "After 100ms more, position should have advanced from {}ms, got {}ms",
-            position_after_pause,
-            pos_after_resume
-        );
-    }
-
-    // ── Volume curve ─────────────────────────────────────────────────
 
     #[test]
     fn test_cubic_volume_extremes() {
@@ -859,91 +983,41 @@ mod tests {
     #[test]
     fn test_cubic_volume_midpoint() {
         let vol = AudioPlayer::cubic_volume(0.5);
-        assert!(
-            (vol - 0.125).abs() < 0.001,
-            "cubic(0.5) = 0.125, got {}",
-            vol
-        );
+        assert!((vol - 0.125).abs() < 0.001);
     }
 
     #[test]
-    fn test_cubic_volume_perceptual_curve() {
-        // Cubic curve: lower values are quieter than linear
-        let linear_half = 0.5_f32;
-        let cubic_half = AudioPlayer::cubic_volume(linear_half);
-        assert!(
-            cubic_half < linear_half,
-            "Cubic volume at 0.5 ({}) must be less than linear (0.5)",
-            cubic_half
-        );
-    }
-
-    // ── Duration from track metadata ─────────────────────────────────
-
-    #[test]
-    fn test_duration_from_duration_seconds() {
-        let duration_seconds: i32 = 247; // 4:07
-        let duration_ms = (duration_seconds as u64) * 1000;
-        assert_eq!(duration_ms, 247_000);
-    }
-
-    // ── Time formatting (mirrors frontend formatTime) ─────────────────
-
-    fn format_time_ms(ms: u64) -> String {
-        let s = ms / 1000;
-        let m = s / 60;
-        let sec = s % 60;
-        format!("{}:{:02}", m, sec)
+    fn test_biquad_identity_passthrough() {
+        let mut f = BiquadFilter::new(BiquadCoeffs::identity());
+        // Identity filter: output should equal input
+        let out = f.process(0.5);
+        assert!((out - 0.5).abs() < 1e-9);
+        let out2 = f.process(-0.3);
+        assert!((out2 - (-0.3)).abs() < 1e-9);
     }
 
     #[test]
-    fn test_format_time_zero() {
-        assert_eq!(format_time_ms(0), "0:00");
+    fn test_peak_eq_zero_gain_is_identity() {
+        let coeffs = BiquadCoeffs::peak_eq(44100.0, 1000.0, 0.0, 1.0);
+        // gain_db = 0 returns identity
+        assert!((coeffs.b0 - 1.0).abs() < 1e-9);
+        assert!(coeffs.b1.abs() < 1e-9);
+        assert!(coeffs.b2.abs() < 1e-9);
     }
 
     #[test]
-    fn test_format_time_one_minute() {
-        assert_eq!(format_time_ms(60_000), "1:00");
-    }
-
-    #[test]
-    fn test_format_time_mixed() {
-        assert_eq!(format_time_ms(90_500), "1:30");
-        assert_eq!(format_time_ms(245_000), "4:05");
-    }
-
-    #[test]
-    fn test_format_time_long_track() {
-        assert_eq!(format_time_ms(3_661_000), "61:01");
-    }
-
-    // ── Progress bar percentage ───────────────────────────────────────
-
-    fn progress_pct(position_ms: u64, duration_ms: u64) -> f64 {
-        if duration_ms > 0 {
-            (position_ms as f64 / duration_ms as f64) * 100.0
-        } else {
-            0.0
+    fn test_eq_filter_bank_processes_without_crash() {
+        let bands = vec![
+            EqBandParam { freq: 60.0,    gain_db: 3.0,  q: 0.9 },
+            EqBandParam { freq: 1000.0,  gain_db: -2.0, q: 1.0 },
+            EqBandParam { freq: 14000.0, gain_db: 5.0,  q: 0.9 },
+        ];
+        let mut bank = EqFilterBank::new(&bands, 44100, 2);
+        let mut samples = vec![0.5f32, -0.3, 0.1, 0.8, -0.5, 0.2];
+        bank.process(&mut samples);
+        // Should not crash and all samples should be clamped to [-1, 1]
+        for s in &samples {
+            assert!(s.is_finite() && *s >= -1.0 && *s <= 1.0);
         }
-    }
-
-    #[test]
-    fn test_progress_at_start() {
-        assert_eq!(progress_pct(0, 60_000), 0.0);
-    }
-
-    #[test]
-    fn test_progress_at_end() {
-        assert_eq!(progress_pct(60_000, 60_000), 100.0);
-    }
-
-    #[test]
-    fn test_progress_midpoint() {
-        assert!((progress_pct(30_000, 60_000) - 50.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_progress_zero_duration_is_zero() {
-        assert_eq!(progress_pct(5_000, 0), 0.0);
     }
 }

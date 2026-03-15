@@ -206,3 +206,12 @@ export interface PersistentAppData {
   dismissed_albums: string[];
   search_history: SearchHistoryEntry[];
 }
+
+// ── Equalizer ──
+
+export interface EqBand {
+  freq: number;   // Hz
+  gain: number;   // dB, -12 to +12
+  q: number;      // Q factor (bandwidth)
+  label: string;  // Display name
+}

@@ -1,3 +1,4 @@
+use crate::audio::EqBandParam;
 use crate::models::*;
 use crate::state::AppState;
 use std::path::PathBuf;
@@ -232,6 +233,47 @@ pub async fn previous_track(
     } else {
         Ok(None)
     }
+}
+
+// ── EQ Commands ─────────────────────────────────────────────────────
+
+/// Set equalizer bands and enabled state. Immediately applied to the audio pipeline.
+#[tauri::command]
+pub async fn set_eq(
+    bands: Vec<EqBandParam>,
+    enabled: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state.player.write().set_eq(bands, enabled);
+    Ok(())
+}
+
+/// Return current EQ configuration (for UI synchronisation on startup).
+#[tauri::command]
+pub async fn get_eq_state(
+    state: State<'_, Arc<AppState>>,
+) -> Result<serde_json::Value, String> {
+    let (enabled, bands) = state.player.read().get_eq_state();
+    Ok(serde_json::json!({ "enabled": enabled, "bands": bands }))
+}
+
+// ── Audio Device Commands ────────────────────────────────────────────
+
+/// List all available audio output devices on the host system.
+#[tauri::command]
+pub async fn get_audio_devices() -> Result<Vec<String>, String> {
+    Ok(crate::audio::AudioPlayer::get_audio_devices())
+}
+
+/// Switch the audio output to a specific device (null = system default).
+/// Interrupts current playback; the user must press play to resume.
+#[tauri::command]
+pub async fn set_audio_device(
+    device_name: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state.player.write().set_preferred_device(device_name);
+    Ok(())
 }
 
 /// Play the track at a given queue index, reusing the metadata already stored in the queue entry.

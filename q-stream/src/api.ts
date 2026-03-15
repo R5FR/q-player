@@ -17,6 +17,7 @@ import type {
   LastFmUserSession,
   ArtistEnrichment,
   PersistentAppData,
+  EqBand,
 } from "./types";
 
 // ── Auth ──
@@ -251,6 +252,34 @@ export async function lastfmScrobble(
   durationSecs: number,
 ): Promise<void> {
   return invoke("lastfm_scrobble", { track, artist, durationSecs });
+}
+
+// ── Equalizer ──
+
+export async function setEq(bands: EqBand[], enabled: boolean): Promise<void> {
+  // Map frontend `gain` → Rust `gain_db`
+  const backendBands = bands.map((b) => ({ freq: b.freq, gain_db: b.gain, q: b.q }));
+  return invoke("set_eq", { bands: backendBands, enabled });
+}
+
+export async function getEqState(): Promise<{ enabled: boolean; bands: EqBand[] }> {
+  // Map Rust `gain_db` → frontend `gain`
+  const raw: { enabled: boolean; bands: Array<{ freq: number; gain_db: number; q: number }> } =
+    await invoke("get_eq_state");
+  return {
+    enabled: raw.enabled,
+    bands: raw.bands.map((b) => ({ freq: b.freq, gain: b.gain_db, q: b.q, label: "" })),
+  };
+}
+
+// ── Audio Devices ──
+
+export async function getAudioDevices(): Promise<string[]> {
+  return invoke("get_audio_devices");
+}
+
+export async function setAudioDevice(deviceName: string | null): Promise<void> {
+  return invoke("set_audio_device", { deviceName });
 }
 
 // ── Persistence ──
