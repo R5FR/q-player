@@ -12,6 +12,7 @@ import type {
   LocalTrack,
   LastFmUserSession,
   UnifiedTrack,
+  SearchHistoryEntry,
 } from "./types";
 
 interface NavEntry {
@@ -76,10 +77,18 @@ interface AppStore {
   // Recently played
   recentlyPlayed: UnifiedTrack[];
   addRecentlyPlayed: (track: UnifiedTrack) => void;
+  setRecentlyPlayed: (tracks: UnifiedTrack[]) => void;
 
   // Dismissed recommendation albums
   dismissedAlbums: string[];
   dismissAlbum: (id: string) => void;
+  setDismissedAlbums: (ids: string[]) => void;
+
+  // Search / browsing history
+  searchHistory: SearchHistoryEntry[];
+  addSearchHistoryEntry: (entry: SearchHistoryEntry) => void;
+  removeSearchHistoryEntry: (id: string) => void;
+  setSearchHistory: (entries: SearchHistoryEntry[]) => void;
 
   // UI
   dominantColor: [number, number, number];
@@ -193,6 +202,7 @@ export const useStore = create<AppStore>((set) => ({
     const filtered = state.recentlyPlayed.filter((t) => t.id !== track.id);
     return { recentlyPlayed: [track, ...filtered].slice(0, 6) };
   }),
+  setRecentlyPlayed: (recentlyPlayed) => set({ recentlyPlayed }),
 
   // Dismissed recommendation albums
   dismissedAlbums: [],
@@ -201,6 +211,18 @@ export const useStore = create<AppStore>((set) => ({
       ? state.dismissedAlbums
       : [...state.dismissedAlbums, id],
   })),
+  setDismissedAlbums: (dismissedAlbums) => set({ dismissedAlbums }),
+
+  // Search / browsing history (max 20, deduplicated by id, most recent first)
+  searchHistory: [],
+  addSearchHistoryEntry: (entry) => set((state) => {
+    const filtered = state.searchHistory.filter((e) => e.id !== entry.id);
+    return { searchHistory: [entry, ...filtered].slice(0, 20) };
+  }),
+  removeSearchHistoryEntry: (id) => set((state) => ({
+    searchHistory: state.searchHistory.filter((e) => e.id !== id),
+  })),
+  setSearchHistory: (searchHistory) => set({ searchHistory }),
 
   // UI
   dominantColor: [18, 18, 24],

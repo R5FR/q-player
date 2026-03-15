@@ -9,6 +9,7 @@ mod lastfm;
 mod local_library;
 mod models;
 mod musicbrainz;
+mod persistence;
 mod qobuz;
 mod recommendation;
 mod state;
@@ -119,6 +120,9 @@ fn main() {
             commands::recommendations::get_artist_enrichment,
             commands::recommendations::get_unknown_albums_by_known_artists,
             commands::recommendations::get_genre_exploration,
+            // Persistence
+            commands::persistence::load_app_data,
+            commands::persistence::save_app_data,
             // Last.fm
             commands::lastfm::lastfm_start_auth,
             commands::lastfm::lastfm_complete_auth,

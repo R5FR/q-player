@@ -8,13 +8,35 @@ import PlayerBar from "./components/PlayerBar";
 import LoginModal from "./components/LoginModal";
 
 export default function App() {
-  const { session, setSession, dominantColor, setPlayback, setLastfmUser, addRecentlyPlayed } = useStore();
+  const {
+    session, setSession, dominantColor, setPlayback, setLastfmUser, addRecentlyPlayed,
+    recentlyPlayed, dismissedAlbums, searchHistory,
+    setRecentlyPlayed, setDismissedAlbums, setSearchHistory,
+  } = useStore();
 
-  // Restore persisted Qobuz + Last.fm sessions on mount
+  // Restore persisted Qobuz + Last.fm sessions, then load app data from disk
   useEffect(() => {
     api.restoreSession().then(setSession).catch(() => api.getSession().then(setSession).catch(console.error));
     api.lastfmGetSession().then((s) => { if (s) setLastfmUser(s); }).catch(() => {});
+
+    api.loadAppData().then((data) => {
+      if (data.recently_played.length) setRecentlyPlayed(data.recently_played);
+      if (data.dismissed_albums.length) setDismissedAlbums(data.dismissed_albums);
+      if (data.search_history.length) setSearchHistory(data.search_history);
+    }).catch(() => {});
   }, []);
+
+  // Auto-save persistent data 1 s after any change (debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      api.saveAppData({
+        recently_played: recentlyPlayed,
+        dismissed_albums: dismissedAlbums,
+        search_history: searchHistory,
+      }).catch(() => {});
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [recentlyPlayed, dismissedAlbums, searchHistory]);
 
   // Poll playback state + scrobbling + smart queue refill
   useEffect(() => {

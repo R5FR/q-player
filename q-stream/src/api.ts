@@ -16,6 +16,7 @@ import type {
   LocalTrack,
   LastFmUserSession,
   ArtistEnrichment,
+  PersistentAppData,
 } from "./types";
 
 // ── Auth ──
@@ -250,4 +251,16 @@ export async function lastfmScrobble(
   durationSecs: number,
 ): Promise<void> {
   return invoke("lastfm_scrobble", { track, artist, durationSecs });
+}
+
+// ── Persistence ──
+
+/** Load recently played, dismissed albums and search history from disk. */
+export async function loadAppData(): Promise<PersistentAppData> {
+  return invoke("load_app_data");
+}
+
+/** Persist recently played, dismissed albums and search history to disk. */
+export async function saveAppData(data: PersistentAppData): Promise<void> {
+  return invoke("save_app_data", { data });
 }

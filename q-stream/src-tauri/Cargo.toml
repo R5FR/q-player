@@ -35,6 +35,15 @@ color-thief = "0.2"
 walkdir = "2"
 urlencoding = "2"
 
+[profile.dev]
+# Reduce debug info to line tables only (instead of full DWARF).
+# Fixes MSVC LNK1140 "PDB size exceeded" on large dependency graphs.
+debug = 1
+
+[profile.dev.package."*"]
+# Compile dependencies with minimal debug info to keep PDB small.
+debug = false
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

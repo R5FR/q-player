@@ -189,3 +189,20 @@ export interface ArtistEnrichment {
   bio?: string;
   mbid?: string;
 }
+
+// ── Persistent app data ──
+
+export interface SearchHistoryEntry {
+  id: string;
+  title: string;
+  subtitle: string;
+  cover_url?: string;
+  entry_type: "album" | "artist" | "track" | "playlist";
+}
+
+/** Matches the Rust PersistentAppData struct (snake_case for Tauri interop). */
+export interface PersistentAppData {
+  recently_played: UnifiedTrack[];
+  dismissed_albums: string[];
+  search_history: SearchHistoryEntry[];
+}

@@ -482,3 +482,27 @@ pub struct MusicBrainzTag {
 pub struct WikipediaSummary {
     pub extract: Option<String>,
 }
+
+// ── Persistent App Data (saved to ~/.config/q-stream/app_data.json) ──
+
+/// A single entry in the browsing / search history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchHistoryEntry {
+    pub id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub cover_url: Option<String>,
+    /// One of: "album" | "artist" | "track" | "playlist"
+    pub entry_type: String,
+}
+
+/// All data persisted across sessions.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PersistentAppData {
+    #[serde(default)]
+    pub recently_played: Vec<UnifiedTrack>,
+    #[serde(default)]
+    pub dismissed_albums: Vec<String>,
+    #[serde(default)]
+    pub search_history: Vec<SearchHistoryEntry>,
+}
