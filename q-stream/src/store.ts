@@ -24,6 +24,19 @@ const DEFAULT_EQ_BANDS: EqBand[] = [
   { freq: 14000, gain: 0, q: 0.9, label: "Treble"   },
 ];
 
+const DEFAULT_EQ_BANDS_ADVANCED: EqBand[] = [
+  { freq: 32,    gain: 0, q: 0.9, label: "Sub"      },
+  { freq: 64,    gain: 0, q: 0.9, label: "Bass"     },
+  { freq: 125,   gain: 0, q: 1.0, label: "Low Bass" },
+  { freq: 250,   gain: 0, q: 1.0, label: "Low Mid"  },
+  { freq: 500,   gain: 0, q: 1.0, label: "Mid"      },
+  { freq: 1000,  gain: 0, q: 1.0, label: "Upper"    },
+  { freq: 2000,  gain: 0, q: 1.0, label: "Presence" },
+  { freq: 4000,  gain: 0, q: 1.0, label: "High Mid" },
+  { freq: 8000,  gain: 0, q: 0.9, label: "High"     },
+  { freq: 16000, gain: 0, q: 0.9, label: "Air"      },
+];
+
 interface NavEntry {
   view: ViewType;
   param: string | null;
@@ -106,6 +119,8 @@ interface AppStore {
   setLoading: (l: boolean) => void;
   error: string | null;
   setError: (e: string | null) => void;
+  isDarkMode: boolean;
+  toggleTheme: () => void;
 
   // Last.fm
   lastfmUser: LastFmUserSession | null;
@@ -121,6 +136,11 @@ interface AppStore {
   eqBands: EqBand[];
   updateEqBand: (index: number, gain: number) => void;
   resetEq: () => void;
+  eqAdvanced: boolean;
+  setEqAdvanced: (v: boolean) => void;
+  eqBandsAdvanced: EqBand[];
+  updateEqBandAdvanced: (index: number, gain: number) => void;
+  resetEqAdvanced: () => void;
   showEqPanel: boolean;
   setShowEqPanel: (v: boolean) => void;
 
@@ -263,6 +283,8 @@ export const useStore = create<AppStore>((set) => ({
   setLoading: (isLoading) => set({ isLoading }),
   error: null,
   setError: (error) => set({ error }),
+  isDarkMode: true,
+  toggleTheme: () => set((state) => ({ isDarkMode: !state.isDarkMode })),
 
   // Last.fm
   lastfmUser: null,
@@ -281,6 +303,14 @@ export const useStore = create<AppStore>((set) => ({
     return { eqBands: bands };
   }),
   resetEq: () => set({ eqBands: DEFAULT_EQ_BANDS }),
+  eqAdvanced: false,
+  setEqAdvanced: (eqAdvanced) => set({ eqAdvanced }),
+  eqBandsAdvanced: DEFAULT_EQ_BANDS_ADVANCED,
+  updateEqBandAdvanced: (index, gain) => set((state) => {
+    const bands = state.eqBandsAdvanced.map((b, i) => i === index ? { ...b, gain } : b);
+    return { eqBandsAdvanced: bands };
+  }),
+  resetEqAdvanced: () => set({ eqBandsAdvanced: DEFAULT_EQ_BANDS_ADVANCED }),
   showEqPanel: false,
   setShowEqPanel: (showEqPanel) => set({ showEqPanel }),
 

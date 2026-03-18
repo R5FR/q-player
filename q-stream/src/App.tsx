@@ -13,7 +13,13 @@ export default function App() {
     recentlyPlayed, dismissedAlbums, searchHistory,
     setRecentlyPlayed, setDismissedAlbums, setSearchHistory,
     isSeeking, sleepTimerEndMs, setSleepTimer,
+    isDarkMode,
   } = useStore();
+
+  // Apply dark/light class on <html> for CSS variable theming
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", !isDarkMode);
+  }, [isDarkMode]);
 
   // Restore persisted Qobuz + Last.fm sessions, then load app data from disk
   useEffect(() => {
@@ -149,9 +155,9 @@ export default function App() {
       style={{
         backgroundColor: `rgb(${dr}, ${dg}, ${db})`,
         backgroundImage: `
-          radial-gradient(ellipse at 15% 60%, rgba(0, 212, 255, 0.04) 0%, transparent 55%),
-          radial-gradient(ellipse at 85% 15%, rgba(139, 92, 246, 0.04) 0%, transparent 55%),
-          radial-gradient(ellipse at 50% 90%, rgba(${Math.floor(r * 0.4)}, ${Math.floor(g * 0.35)}, ${Math.floor(b * 0.5)}, 0.06) 0%, transparent 50%)
+          radial-gradient(ellipse at 15% 60%, rgb(var(--qs-accent) / 0.04) 0%, transparent 55%),
+          radial-gradient(ellipse at 85% 15%, rgb(var(--qs-accent-2) / 0.04) 0%, transparent 55%),
+          radial-gradient(ellipse at 50% 90%, rgba(${Math.floor(r * 0.4)}, ${Math.floor(g * 0.35)}, ${Math.floor(b * 0.5)}, 0.05) 0%, transparent 50%)
         `,
       }}
     >

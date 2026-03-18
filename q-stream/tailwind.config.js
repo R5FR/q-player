@@ -3,24 +3,27 @@ export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
+      // All colors reference CSS custom properties so dark/light theme works
+      // The `<alpha-value>` placeholder enables Tailwind opacity modifiers (bg-qs-accent/10, etc.)
       colors: {
-        "qs-dark":          "#04060f",   // near-black, blue-tinted
-        "qs-surface":       "#080c1a",   // card background
-        "qs-surface-light": "#0d1228",   // elevated surface
-        "qs-surface-3":     "#131b38",   // hover state
-        "qs-accent":        "#00d4ff",   // neon cyan — primary
-        "qs-accent-2":      "#8b5cf6",   // electric purple — secondary
-        "qs-accent-light":  "#67e8f9",   // light cyan for text
-        "qs-green":         "#06ffa5",   // neon green
-        "qs-red":           "#ff3358",   // neon red
-        "qs-text":          "#c5d8f0",   // primary text (cool white)
-        "qs-text-dim":      "#3b5470",   // muted text
+        "qs-dark":          "rgb(var(--qs-bg) / <alpha-value>)",
+        "qs-surface":       "rgb(var(--qs-surface) / <alpha-value>)",
+        "qs-surface-light": "rgb(var(--qs-surface-2) / <alpha-value>)",
+        "qs-surface-3":     "rgb(var(--qs-surface-3) / <alpha-value>)",
+        "qs-accent":        "rgb(var(--qs-accent) / <alpha-value>)",
+        "qs-accent-2":      "rgb(var(--qs-accent-2) / <alpha-value>)",
+        "qs-accent-light":  "rgb(var(--qs-accent-light) / <alpha-value>)",
+        "qs-green":         "rgb(var(--qs-green) / <alpha-value>)",
+        "qs-red":           "rgb(var(--qs-red) / <alpha-value>)",
+        "qs-text":          "rgb(var(--qs-text) / <alpha-value>)",
+        "qs-text-dim":      "rgb(var(--qs-text-dim) / <alpha-value>)",
+      },
+      fontFamily: {
+        sans: ["'Outfit'", "system-ui", "sans-serif"],
+        mono: ["'JetBrains Mono'", "'Fira Code'", "Consolas", "ui-monospace", "monospace"],
       },
       backdropBlur: {
         xs: "2px",
-      },
-      fontFamily: {
-        mono: ["'JetBrains Mono'", "'Fira Code'", "Consolas", "ui-monospace", "monospace"],
       },
       animation: {
         "pulse-slow":  "pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite",
@@ -31,8 +34,8 @@ export default {
       },
       keyframes: {
         "glow-pulse": {
-          "0%, 100%": { boxShadow: "0 0 8px rgba(0,212,255,0.3)" },
-          "50%":       { boxShadow: "0 0 24px rgba(0,212,255,0.7), 0 0 48px rgba(0,212,255,0.2)" },
+          "0%, 100%": { boxShadow: "0 0 8px rgb(var(--qs-accent) / 0.3)" },
+          "50%":       { boxShadow: "0 0 24px rgb(var(--qs-accent) / 0.6), 0 0 48px rgb(var(--qs-accent) / 0.15)" },
         },
         scan: {
           "0%":   { transform: "translateY(-100%)", opacity: "0" },
@@ -46,11 +49,11 @@ export default {
         },
       },
       boxShadow: {
-        "neon-cyan":   "0 0 12px rgba(0,212,255,0.45), 0 0 28px rgba(0,212,255,0.15)",
-        "neon-purple": "0 0 12px rgba(139,92,246,0.45), 0 0 28px rgba(139,92,246,0.15)",
-        "neon-green":  "0 0 12px rgba(6,255,165,0.45), 0 0 28px rgba(6,255,165,0.15)",
-        "neon-sm":     "0 0 6px rgba(0,212,255,0.5)",
-        "inner-glow":  "inset 0 0 24px rgba(0,212,255,0.04)",
+        "neon-cyan":   "0 0 10px rgb(var(--qs-accent) / 0.4), 0 0 24px rgb(var(--qs-accent) / 0.12)",
+        "neon-purple": "0 0 10px rgb(var(--qs-accent-2) / 0.4), 0 0 24px rgb(var(--qs-accent-2) / 0.12)",
+        "neon-green":  "0 0 10px rgb(var(--qs-green) / 0.4), 0 0 24px rgb(var(--qs-green) / 0.12)",
+        "neon-sm":     "0 0 5px rgb(var(--qs-accent) / 0.45)",
+        "inner-glow":  "inset 0 0 24px rgb(var(--qs-accent) / 0.03)",
       },
     },
   },

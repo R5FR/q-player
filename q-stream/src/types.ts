@@ -177,7 +177,8 @@ export type ViewType =
   | "artist"
   | "playlist"
   | "queue"
-  | "local";
+  | "local"
+  | "eq";
 
 export interface LastFmUserSession {
   session_key: string;

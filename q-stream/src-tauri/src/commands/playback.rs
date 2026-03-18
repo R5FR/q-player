@@ -257,6 +257,14 @@ pub async fn get_eq_state(
     Ok(serde_json::json!({ "enabled": enabled, "bands": bands }))
 }
 
+/// Returns the latest FFT spectrum data (80 bins, 0.0–1.0 normalized).
+#[tauri::command]
+pub async fn get_spectrum(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<f32>, String> {
+    Ok(state.player.read().get_spectrum())
+}
+
 // ── Audio Device Commands ────────────────────────────────────────────
 
 /// List all available audio output devices on the host system.

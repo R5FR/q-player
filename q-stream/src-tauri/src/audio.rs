@@ -18,6 +18,8 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use symphonia::core::units::Time;
 use tracing::{debug, error, info, warn};
+use rustfft::{FftPlanner, num_complex::Complex};
+use std::f32::consts::PI;
 
 // ── ArcCursor: seekable memory source backed by Arc<Vec<u8>> (no data copy) ──
 
@@ -72,6 +74,10 @@ pub struct EqSharedState {
     pub bands: Vec<EqBandParam>,
     pub version: u64,
 }
+
+// ── Spectrum FFT constants ────────────────────────────────────────────────────
+const FFT_SIZE: usize = 2048;
+const SPECTRUM_BINS: usize = 80;
 
 /// Biquad filter coefficients (Direct Form II Transposed).
 #[derive(Debug, Clone)]
@@ -245,6 +251,7 @@ enum AudioCommand {
 #[derive(Debug, Clone)]
 pub enum PlayerEvent {
     TrackEnded,
+    Spectrum(Vec<f32>),
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -267,6 +274,9 @@ pub struct AudioPlayer {
 
     /// EQ state shared with decoder thread.
     pub eq_state: Arc<parking_lot::Mutex<EqSharedState>>,
+
+    /// Latest spectrum data (80 bins), written by decoder thread, read by frontend poll.
+    pub spectrum: Arc<parking_lot::Mutex<Vec<f32>>>,
 }
 
 unsafe impl Send for AudioPlayer {}
@@ -283,6 +293,8 @@ impl AudioPlayer {
         let is_finished = Arc::new(AtomicBool::new(true));
         let eq_state: Arc<parking_lot::Mutex<EqSharedState>> =
             Arc::new(parking_lot::Mutex::new(EqSharedState::default()));
+        let spectrum: Arc<parking_lot::Mutex<Vec<f32>>> =
+            Arc::new(parking_lot::Mutex::new(vec![0.0; SPECTRUM_BINS]));
 
         let shared = SharedState {
             is_playing: is_playing.clone(),
@@ -290,6 +302,7 @@ impl AudioPlayer {
             duration_ms: duration_ms.clone(),
             is_finished: is_finished.clone(),
             eq_state: eq_state.clone(),
+            spectrum: spectrum.clone(),
         };
 
         thread::Builder::new()
@@ -311,6 +324,7 @@ impl AudioPlayer {
                 duration_ms,
                 is_finished,
                 eq_state,
+                spectrum,
             },
             event_rx,
         )
@@ -450,6 +464,11 @@ impl AudioPlayer {
         devices
     }
 
+    /// Returns the latest spectrum data (80 bins, 0.0–1.0 normalized).
+    pub fn get_spectrum(&self) -> Vec<f32> {
+        self.spectrum.lock().clone()
+    }
+
     #[allow(dead_code)]
     pub fn is_finished(&self) -> bool {
         self.is_finished.load(Ordering::SeqCst)
@@ -479,6 +498,7 @@ struct SharedState {
     duration_ms: Arc<AtomicU64>,
     is_finished: Arc<AtomicBool>,
     eq_state: Arc<parking_lot::Mutex<EqSharedState>>,
+    spectrum: Arc<parking_lot::Mutex<Vec<f32>>>,
 }
 
 struct DecoderState {
@@ -512,6 +532,12 @@ fn decoder_thread(
     // EQ filter bank (rebuilt on SetEq or sample-rate change)
     let mut eq_filter_bank: Option<EqFilterBank> = None;
     let mut eq_version_seen: u64 = 0;
+
+    // FFT spectrum analyzer
+    let mut fft_planner = FftPlanner::<f32>::new();
+    let fft_forward = fft_planner.plan_fft_forward(FFT_SIZE);
+    let mut fft_buf: Vec<f32> = Vec::with_capacity(FFT_SIZE * 2);
+    let mut last_spectrum_emit = Instant::now();
 
     loop {
         let buffer_full = sink.as_ref().map(|s| s.len() > 20).unwrap_or(false);
@@ -646,6 +672,8 @@ fn decoder_thread(
                     shared.position_ms.store(0, Ordering::SeqCst);
                     shared.is_playing.store(false, Ordering::SeqCst);
                     shared.is_finished.store(true, Ordering::SeqCst);
+                    fft_buf.clear();
+                    shared.spectrum.lock().iter_mut().for_each(|v| *v = 0.0);
                 }
 
                 AudioCommand::SetVolume(v) => {
@@ -801,6 +829,30 @@ fn decoder_thread(
                             eq_filter_bank = None;
                         }
 
+                        // ── Spectrum FFT accumulation ──────────────────────
+                        {
+                            let ch = channels as usize;
+                            for frame in samples.chunks(ch) {
+                                let mono = frame.iter().sum::<f32>() / ch as f32;
+                                fft_buf.push(mono);
+                            }
+                            while fft_buf.len() >= FFT_SIZE {
+                                if last_spectrum_emit.elapsed() >= Duration::from_millis(33) {
+                                    let spectrum = compute_log_spectrum(
+                                        &fft_buf[..FFT_SIZE],
+                                        sr,
+                                        SPECTRUM_BINS,
+                                        &fft_forward,
+                                    );
+                                    *shared.spectrum.lock() = spectrum;
+                                    last_spectrum_emit = Instant::now();
+                                }
+                                // 50% overlap hop
+                                let hop = FFT_SIZE / 2;
+                                fft_buf.drain(..hop);
+                            }
+                        }
+
                         if let Some(sk) = &sink {
                             sk.append(SamplesBuffer::new(channels, sr, samples));
                         }
@@ -827,6 +879,56 @@ fn decoder_thread(
             }
         }
     }
+}
+
+// ── FFT / Spectrum helpers ────────────────────────────────────────────
+
+fn compute_log_spectrum(
+    samples: &[f32],
+    sample_rate: u32,
+    n_bins: usize,
+    fft: &std::sync::Arc<dyn rustfft::Fft<f32>>,
+) -> Vec<f32> {
+    let n = samples.len();
+    // Hann window
+    let mut buf: Vec<Complex<f32>> = samples
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let w = 0.5 * (1.0 - (2.0 * PI * i as f32 / (n - 1) as f32).cos());
+            Complex::new(s * w, 0.0)
+        })
+        .collect();
+
+    fft.process(&mut buf);
+
+    let min_f = 20.0_f32;
+    let max_f = (sample_rate as f32 / 2.0).min(20000.0);
+
+    (0..n_bins)
+        .map(|i| {
+            let t = i as f32 / (n_bins - 1) as f32;
+            let freq = min_f * (max_f / min_f).powf(t);
+
+            let t_lo = ((i as f32 - 0.5) / (n_bins - 1) as f32).max(0.0);
+            let t_hi = ((i as f32 + 0.5) / (n_bins - 1) as f32).min(1.0);
+            let f_lo = min_f * (max_f / min_f).powf(t_lo);
+            let f_hi = min_f * (max_f / min_f).powf(t_hi);
+
+            let bin_lo = ((f_lo * n as f32 / sample_rate as f32) as usize).max(1);
+            let bin_hi = ((f_hi * n as f32 / sample_rate as f32) as usize + 1).min(n / 2);
+
+            if bin_hi <= bin_lo {
+                let b = ((freq * n as f32 / sample_rate as f32) as usize)
+                    .max(1)
+                    .min(n / 2 - 1);
+                return buf[b].norm() * 2.0 / n as f32;
+            }
+
+            let sum: f32 = buf[bin_lo..bin_hi].iter().map(|c| c.norm()).sum();
+            sum / (bin_hi - bin_lo) as f32 * 2.0 / n as f32
+        })
+        .collect()
 }
 
 // ── Helper functions ─────────────────────────────────────────────────

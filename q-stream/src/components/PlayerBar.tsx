@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   Play,
   Pause,
@@ -11,22 +11,17 @@ import {
   VolumeX,
   Shuffle,
   Repeat,
-  SlidersHorizontal,
   Moon,
   Monitor,
-  ChevronDown,
 } from "lucide-react";
 import { useStore } from "../store";
 import * as api from "../api";
-import EqPanel from "./EqPanel";
 
 export default function PlayerBar() {
   const {
     playback, setPlayback, setDominantColor,
     shuffle, setShuffle, repeatMode, cycleRepeat,
-    isSeeking, setIsSeeking,
-    showEqPanel, setShowEqPanel,
-    eqEnabled, eqBands,
+    setIsSeeking,
     audioDevices, setAudioDevices, selectedDevice, setSelectedDevice,
     sleepTimerEndMs, setSleepTimer,
   } = useStore();
@@ -209,7 +204,7 @@ export default function PlayerBar() {
   const progress = playback.duration_ms > 0 ? (currentPos / playback.duration_ms) * 100 : 0;
 
   return (
-    <div className="glass-heavy border-t border-white/10 px-4 py-2 relative">
+    <div className="glass-heavy border-t border-qs-text/8 px-4 py-2 relative">
       <div className="flex items-center gap-4 h-[72px]">
         {/* Track Info */}
         <div className="flex items-center gap-3 w-[280px] min-w-[200px]">
@@ -225,7 +220,7 @@ export default function PlayerBar() {
                 )}
               </motion.div>
               <div className="min-w-0">
-                <p className="text-sm font-medium text-white truncate">{track.title}</p>
+                <p className="text-sm font-medium text-qs-text truncate">{track.title}</p>
                 <p className="text-xs text-qs-text-dim truncate">{track.artist}</p>
                 <div className="mt-0.5">{qualityBadge()}</div>
               </div>
@@ -247,12 +242,12 @@ export default function PlayerBar() {
             <button
               onClick={handleShuffle}
               title="Shuffle"
-              className={`transition relative ${shuffle ? "text-qs-accent" : "text-qs-text-dim hover:text-white"}`}
+              className={`transition relative ${shuffle ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"}`}
             >
               <Shuffle className="w-4 h-4" />
               {shuffle && <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-qs-accent" />}
             </button>
-            <button onClick={handlePrev} className="text-qs-text-dim hover:text-white transition">
+            <button onClick={handlePrev} className="text-qs-text-dim hover:text-qs-text transition">
               <SkipBack className="w-5 h-5" />
             </button>
             <motion.button
@@ -266,13 +261,13 @@ export default function PlayerBar() {
                 <Play className="w-4 h-4 text-qs-accent ml-0.5" />
               )}
             </motion.button>
-            <button onClick={handleNext} className="text-qs-text-dim hover:text-white transition">
+            <button onClick={handleNext} className="text-qs-text-dim hover:text-qs-text transition">
               <SkipForward className="w-5 h-5" />
             </button>
             <button
               onClick={cycleRepeat}
               title={repeatMode === "off" ? "Repeat off" : repeatMode === "all" ? "Repeat all" : "Repeat one"}
-              className={`transition relative ${repeatMode !== "off" ? "text-qs-accent" : "text-qs-text-dim hover:text-white"}`}
+              className={`transition relative ${repeatMode !== "off" ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"}`}
             >
               <Repeat className="w-4 h-4" />
               {repeatMode === "one" && (
@@ -307,8 +302,8 @@ export default function PlayerBar() {
                 className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                 style={{
                   left: `calc(${progress}% - 5px)`,
-                  background: "#00d4ff",
-                  boxShadow: "0 0 8px rgba(0,212,255,0.8)",
+                  background: "rgb(var(--qs-accent))",
+                  boxShadow: "0 0 8px rgb(var(--qs-accent) / 0.75)",
                 }}
               />
             </div>
@@ -322,7 +317,7 @@ export default function PlayerBar() {
         <div className="flex items-center gap-3 w-[240px] justify-end">
           {/* Volume */}
           <div className="flex items-center gap-1.5">
-            <button onClick={handleMuteToggle} className="text-qs-text-dim hover:text-white transition flex-shrink-0">
+            <button onClick={handleMuteToggle} className="text-qs-text-dim hover:text-qs-text transition flex-shrink-0">
               <VolumeIcon className="w-4 h-4" />
             </button>
             <input
@@ -334,55 +329,41 @@ export default function PlayerBar() {
               onChange={handleVolume}
               className="volume-slider w-20 cursor-pointer"
               style={{
-                background: `linear-gradient(to right, #00d4ff ${localVolume * 100}%, rgba(0,212,255,0.15) ${localVolume * 100}%)`,
+                background: `linear-gradient(to right, rgb(var(--qs-accent)) ${localVolume * 100}%, rgb(var(--qs-accent) / 0.14) ${localVolume * 100}%)`,
               }}
             />
           </div>
-
-          {/* EQ toggle */}
-          <button
-            onClick={() => setShowEqPanel(!showEqPanel)}
-            title="Equalizer"
-            className={`transition flex-shrink-0 ${eqEnabled || showEqPanel ? "text-qs-accent" : "text-qs-text-dim hover:text-white"}`}
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-          </button>
 
           {/* Audio output device */}
           <div className="relative flex-shrink-0" ref={deviceMenuRef}>
             <button
               onClick={() => setShowDeviceMenu(!showDeviceMenu)}
               title="Audio output"
-              className={`transition ${selectedDevice !== "Default" ? "text-qs-accent" : "text-qs-text-dim hover:text-white"}`}
+              className={`transition ${selectedDevice !== "Default" ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"}`}
             >
               <Monitor className="w-4 h-4" />
             </button>
-            <AnimatePresence>
-              {showDeviceMenu && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  className="absolute bottom-full right-0 mb-2 w-56 glass rounded-xl border border-white/10 overflow-hidden z-50"
+            <div
+              className={`absolute bottom-full right-0 mb-2 w-56 glass rounded-xl border border-qs-text/8 overflow-hidden z-50
+                transition-all duration-150 origin-bottom-right
+                ${showDeviceMenu ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
+            >
+              <div className="px-3 py-2 border-b border-qs-text/5">
+                <p className="text-[10px] text-qs-text-dim uppercase tracking-wider font-semibold">Audio Output</p>
+              </div>
+              {audioDevices.map((dev) => (
+                <button
+                  key={dev}
+                  onClick={() => handleDeviceSelect(dev)}
+                  className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center gap-2 ${
+                    selectedDevice === dev ? "text-qs-accent bg-qs-accent/5" : "text-qs-text-dim hover:text-qs-text hover:bg-qs-accent/5"
+                  }`}
                 >
-                  <div className="px-3 py-2 border-b border-white/5">
-                    <p className="text-[10px] text-qs-text-dim uppercase tracking-wider font-semibold">Audio Output</p>
-                  </div>
-                  {audioDevices.map((dev) => (
-                    <button
-                      key={dev}
-                      onClick={() => handleDeviceSelect(dev)}
-                      className={`w-full text-left px-3 py-2 text-xs transition flex items-center gap-2 ${
-                        selectedDevice === dev ? "text-qs-accent bg-qs-accent/5" : "text-qs-text-dim hover:text-white hover:bg-white/5"
-                      }`}
-                    >
-                      {selectedDevice === dev && <span className="w-1 h-1 rounded-full bg-qs-accent flex-shrink-0" />}
-                      <span className="truncate">{dev}</span>
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+                  {selectedDevice === dev && <span className="w-1 h-1 rounded-full bg-qs-accent flex-shrink-0" />}
+                  <span className="truncate">{dev}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Sleep timer */}
@@ -390,7 +371,7 @@ export default function PlayerBar() {
             <button
               onClick={() => setShowSleepMenu(!showSleepMenu)}
               title="Sleep timer"
-              className={`transition relative ${sleepTimerEndMs ? "text-qs-accent" : "text-qs-text-dim hover:text-white"}`}
+              className={`transition relative ${sleepTimerEndMs ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"}`}
             >
               <Moon className="w-4 h-4" />
               {sleepTimerEndMs && (
@@ -399,39 +380,30 @@ export default function PlayerBar() {
                 </span>
               )}
             </button>
-            <AnimatePresence>
-              {showSleepMenu && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  className="absolute bottom-full right-0 mb-2 w-40 glass rounded-xl border border-white/10 overflow-hidden z-50"
+            <div
+              className={`absolute bottom-full right-0 mb-2 w-40 glass rounded-xl border border-qs-text/8 overflow-hidden z-50
+                transition-all duration-150 origin-bottom-right
+                ${showSleepMenu ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
+            >
+              <div className="px-3 py-2 border-b border-qs-text/5">
+                <p className="text-[10px] text-qs-text-dim uppercase tracking-wider font-semibold">Sleep Timer</p>
+              </div>
+              {[null, 15, 30, 45, 60].map((min) => (
+                <button
+                  key={min ?? "off"}
+                  onClick={() => handleSleepTimer(min)}
+                  className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center gap-2 ${
+                    (min === null && !sleepTimerEndMs) ? "text-qs-accent bg-qs-accent/5" : "text-qs-text-dim hover:text-qs-text hover:bg-qs-accent/5"
+                  }`}
                 >
-                  <div className="px-3 py-2 border-b border-white/5">
-                    <p className="text-[10px] text-qs-text-dim uppercase tracking-wider font-semibold">Sleep Timer</p>
-                  </div>
-                  {[null, 15, 30, 45, 60].map((min) => (
-                    <button
-                      key={min ?? "off"}
-                      onClick={() => handleSleepTimer(min)}
-                      className={`w-full text-left px-3 py-2 text-xs transition flex items-center gap-2 ${
-                        (min === null && !sleepTimerEndMs) ? "text-qs-accent bg-qs-accent/5" : "text-qs-text-dim hover:text-white hover:bg-white/5"
-                      }`}
-                    >
-                      {min === null ? "Off" : `${min} minutes`}
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+                  {min === null ? "Off" : `${min} minutes`}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* EQ Panel (floats above the player bar) */}
-      <AnimatePresence>
-        {showEqPanel && <EqPanel />}
-      </AnimatePresence>
     </div>
   );
 }

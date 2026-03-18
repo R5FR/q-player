@@ -47,7 +47,7 @@ export default function LoginModal() {
             <motion.div
               animate={{ rotate: 360 }}
               transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
-              className="w-16 h-16 rounded-full bg-gradient-to-br from-qs-accent to-purple-600 flex items-center justify-center mb-4"
+              className="w-16 h-16 rounded-full bg-gradient-to-br from-qs-accent to-qs-accent-2 flex items-center justify-center mb-4"
             >
               <Disc3 className="w-8 h-8 text-white" />
             </motion.div>
@@ -93,7 +93,7 @@ export default function LoginModal() {
             <button
               type="submit"
               disabled={loading || !email || !password}
-              className="w-full py-3 bg-gradient-to-r from-qs-accent to-purple-600 rounded-xl font-semibold text-white hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full py-3 bg-gradient-to-r from-qs-accent to-qs-accent-2 rounded-xl font-semibold text-white hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>

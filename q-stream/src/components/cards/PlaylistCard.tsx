@@ -11,14 +11,17 @@ export default function PlaylistCard({ playlist, onClick }: PlaylistCardProps) {
   const coverUrl = playlist.images300?.[0] || playlist.image_rectangle_mini?.[0];
 
   return (
-    <motion.button
-      whileHover={{ y: -4 }}
-      whileTap={{ scale: 0.98 }}
+    <button
       onClick={onClick}
-      className="group text-left p-3 rounded-xl hover:bg-white/5 transition-all"
+      className="group text-left p-3 rounded-xl hover:bg-white/5 transition-all w-full"
     >
       <div className="relative mb-3">
-        <div className="aspect-square rounded-lg overflow-hidden shadow-lg bg-qs-surface">
+        <motion.div
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.97 }}
+          transition={{ type: "spring", stiffness: 300, damping: 20 }}
+          className="aspect-square rounded-lg overflow-hidden shadow-lg bg-qs-surface"
+        >
           {coverUrl ? (
             <img
               src={coverUrl}
@@ -31,20 +34,16 @@ export default function PlaylistCard({ playlist, onClick }: PlaylistCardProps) {
               🎶
             </div>
           )}
-        </div>
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          whileHover={{ opacity: 1, scale: 1 }}
-          className="absolute bottom-2 right-2 w-10 h-10 rounded-full bg-qs-accent shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <Play className="w-4 h-4 text-white ml-0.5" />
+          <div className="absolute bottom-2 right-2 w-10 h-10 rounded-full btn-play-cyber flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <Play className="w-4 h-4 text-qs-accent ml-0.5" />
+          </div>
         </motion.div>
       </div>
-      <p className="text-sm font-medium text-white truncate">{playlist.name}</p>
+      <p className="text-sm font-medium text-qs-text truncate">{playlist.name}</p>
       <p className="text-xs text-qs-text-dim truncate mt-0.5">
         {playlist.owner?.name || "Qobuz"}
         {playlist.tracks_count ? ` • ${playlist.tracks_count} tracks` : ""}
       </p>
-    </motion.button>
+    </button>
   );
 }

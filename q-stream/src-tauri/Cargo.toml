@@ -33,6 +33,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 image = "0.25"
 color-thief = "0.2"
 walkdir = "2"
+rustfft = "6"
 urlencoding = "2"
 
 [profile.dev]

@@ -59,6 +59,9 @@ fn main() {
                                 tracing::debug!("Emitting track-ended event to frontend");
                                 handle.emit("track-ended", ()).ok();
                             }
+                            PlayerEvent::Spectrum(bins) => {
+                                handle.emit("spectrum-data", &bins).ok();
+                            }
                         }
                     }
                     tracing::info!("Player event bridge shut down");
@@ -86,6 +89,7 @@ fn main() {
             commands::playback::play_from_queue,
             commands::playback::set_eq,
             commands::playback::get_eq_state,
+            commands::playback::get_spectrum,
             commands::playback::get_audio_devices,
             commands::playback::set_audio_device,
             // Browse

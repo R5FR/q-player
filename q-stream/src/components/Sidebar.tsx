@@ -14,6 +14,9 @@ import {
   Loader2,
   Library,
   BookMarked,
+  SlidersHorizontal,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { useStore } from "../store";
@@ -23,6 +26,7 @@ import type { ViewType } from "../types";
 const TOP_NAV: Array<{ icon: typeof Home; label: string; view: ViewType }> = [
   { icon: Home, label: "Accueil", view: "home" },
   { icon: Search, label: "Rechercher", view: "search" },
+  { icon: SlidersHorizontal, label: "Égaliseur", view: "eq" },
 ];
 
 const LIBRARY_NAV: Array<{
@@ -42,7 +46,7 @@ const LIBRARY_NAV: Array<{
 ];
 
 export default function Sidebar() {
-  const { currentView, setView, session, setSession, lastfmUser, setLastfmUser } = useStore();
+  const { currentView, setView, session, setSession, lastfmUser, setLastfmUser, isDarkMode, toggleTheme } = useStore();
   const [lfmState, setLfmState] = useState<"idle" | "pending" | "loading">("idle");
 
   const handleLogout = async () => {
@@ -116,12 +120,20 @@ export default function Sidebar() {
           >
             <Disc3 className="w-4 h-4 text-white" />
           </motion.div>
-          <div className="min-w-0">
-            <h1 className="text-sm font-bold text-white leading-none">Q-Stream</h1>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-sm font-bold text-qs-text leading-none">Q-Stream</h1>
             <p className="text-[9px] text-qs-accent font-medium tracking-widest uppercase mt-0.5">
               Hi-Res Audio
             </p>
           </div>
+          <motion.button
+            whileTap={{ scale: 0.88 }}
+            onClick={toggleTheme}
+            title={isDarkMode ? "Thème clair" : "Thème sombre"}
+            className="w-7 h-7 rounded-md flex items-center justify-center text-qs-text-dim hover:text-qs-text hover:bg-qs-accent/8 transition-colors duration-150 flex-shrink-0"
+          >
+            {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+          </motion.button>
         </div>
 
         {TOP_NAV.map((item) => (
@@ -146,14 +158,14 @@ export default function Sidebar() {
 
         {/* ── Utilisateur ── */}
         {session.logged_in && (
-          <div className="p-3 border-t border-white/5 space-y-2 flex-shrink-0">
+          <div className="p-3 border-t border-qs-text/5 space-y-2 flex-shrink-0">
             {/* Qobuz */}
             <div className="flex items-center gap-2.5 px-1">
               <div className="w-7 h-7 rounded-full bg-qs-accent/15 flex items-center justify-center flex-shrink-0">
                 <User className="w-3.5 h-3.5 text-qs-accent" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-white truncate">{session.user_name}</p>
+                <p className="text-xs font-medium text-qs-text truncate">{session.user_name}</p>
                 {session.subscription && (
                   <p className="text-[9px] text-qs-accent">{session.subscription}</p>
                 )}
@@ -164,7 +176,7 @@ export default function Sidebar() {
             {lastfmUser ? (
               <div className="flex items-center gap-2 px-1">
                 <Radio className="w-3 h-3 text-red-400 flex-shrink-0" />
-                <span className="text-xs text-white/60 truncate flex-1">{lastfmUser.user_name}</span>
+                <span className="text-xs text-qs-text-dim truncate flex-1">{lastfmUser.user_name}</span>
                 <button
                   onClick={handleLastfmDisconnect}
                   className="text-[10px] text-qs-text-dim hover:text-red-400 transition"

@@ -48,7 +48,7 @@ export default function EqPanel() {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 16 }}
       transition={{ type: "spring", damping: 25, stiffness: 300 }}
-      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 eq-panel z-50 p-5 w-[480px]"
+      className="absolute bottom-full left-4 mb-3 eq-panel z-50 p-5 w-[480px]"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-4">

@@ -72,9 +72,8 @@ export default function TrackRow({
     (track.maximum_sampling_rate && track.maximum_sampling_rate > 44.1);
 
   return (
-    <motion.div
-      whileHover={{ backgroundColor: "rgba(0,212,255,0.04)" }}
-      className="grid grid-cols-[40px_1fr_1fr_80px] gap-4 px-4 py-2.5 rounded-lg group items-center cursor-pointer border-l-2 border-transparent hover:border-qs-accent/30 transition-colors"
+    <div
+      className="grid grid-cols-[40px_1fr_1fr_80px] gap-4 px-4 py-2.5 rounded-lg group items-center cursor-pointer border-l-2 border-transparent hover:border-qs-accent/30 hover:bg-qs-accent/[0.04] transition-colors"
       onClick={handlePlay}
     >
       {/* Number / Play / Loading */}
@@ -109,7 +108,7 @@ export default function TrackRow({
           </div>
         )}
         <div className="min-w-0">
-          <p className="text-sm text-white truncate">{track.title}</p>
+          <p className="text-sm text-qs-text truncate">{track.title}</p>
           {track.explicit && (
             <span className="inline-block text-[9px] bg-white/10 text-qs-text-dim px-1 rounded mt-0.5">
               E
@@ -151,6 +150,6 @@ export default function TrackRow({
           {formatDuration(track.duration)}
         </span>
       </div>
-    </motion.div>
+    </div>
   );
 }

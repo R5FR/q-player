@@ -272,6 +272,12 @@ export async function getEqState(): Promise<{ enabled: boolean; bands: EqBand[] 
   };
 }
 
+// ── Spectrum ──
+
+export async function getSpectrum(): Promise<number[]> {
+  return invoke("get_spectrum");
+}
+
 // ── Audio Devices ──
 
 export async function getAudioDevices(): Promise<string[]> {

@@ -14,14 +14,17 @@ export default function AlbumCard({ album, onClick }: AlbumCardProps) {
     (album.maximum_sampling_rate && album.maximum_sampling_rate > 44.1);
 
   return (
-    <motion.button
-      whileHover={{ scale: 1.03 }}
-      whileTap={{ scale: 0.98 }}
+    <button
       onClick={onClick}
-      className="group text-left p-3 rounded-xl hover:bg-qs-accent/5 transition-all"
+      className="group text-left p-3 rounded-xl hover:bg-qs-accent/5 transition-all w-full"
     >
       <div className="relative mb-3">
-        <div className="aspect-square rounded-lg overflow-hidden shadow-lg bg-qs-surface scan-overlay">
+        <motion.div
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.97 }}
+          transition={{ type: "spring", stiffness: 300, damping: 20 }}
+          className="aspect-square rounded-lg overflow-hidden shadow-lg bg-qs-surface scan-overlay"
+        >
           {coverUrl ? (
             <img
               src={coverUrl}
@@ -34,28 +37,24 @@ export default function AlbumCard({ album, onClick }: AlbumCardProps) {
               💿
             </div>
           )}
-        </div>
-        {/* Play button overlay */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          whileHover={{ opacity: 1, scale: 1 }}
-          className="absolute bottom-2 right-2 w-10 h-10 rounded-full btn-play-cyber flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <Play className="w-4 h-4 text-qs-accent ml-0.5" />
+          {/* Play button overlay */}
+          <div className="absolute bottom-2 right-2 w-10 h-10 rounded-full btn-play-cyber flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <Play className="w-4 h-4 text-qs-accent ml-0.5" />
+          </div>
+          {/* Hi-Res badge */}
+          {isHires && (
+            <span className="absolute top-2 left-2 quality-hires text-[8px]">
+              Hi-Res
+            </span>
+          )}
         </motion.div>
-        {/* Hi-Res badge */}
-        {isHires && (
-          <span className="absolute top-2 left-2 quality-hires text-[8px]">
-            Hi-Res
-          </span>
-        )}
       </div>
-      <p className="text-sm font-medium text-white truncate">{album.title}</p>
+      <p className="text-sm font-medium text-qs-text truncate">{album.title}</p>
       <p className="text-xs text-qs-text-dim truncate mt-0.5">
         {album.artist?.name}
         {album.release_date_original &&
           ` • ${album.release_date_original.split("-")[0]}`}
       </p>
-    </motion.button>
+    </button>
   );
 }

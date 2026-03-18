@@ -10,6 +10,7 @@ import ArtistView from "./views/ArtistView";
 import PlaylistView from "./views/PlaylistView";
 import QueueView from "./views/QueueView";
 import LocalView from "./views/LocalView";
+import EqView from "./views/EqView";
 
 const viewComponents: Record<string, React.FC> = {
   home: HomeView,
@@ -20,6 +21,7 @@ const viewComponents: Record<string, React.FC> = {
   playlist: PlaylistView,
   queue: QueueView,
   local: LocalView,
+  eq: EqView,
 };
 
 export default function MainContent() {
@@ -52,7 +54,7 @@ export default function MainContent() {
             disabled={!canGoBack}
             className="w-8 h-8 rounded-full flex items-center justify-center transition
               disabled:opacity-25 disabled:cursor-not-allowed
-              enabled:hover:bg-white/10 text-white"
+              enabled:hover:bg-qs-accent/5 text-qs-text"
             aria-label="Retour"
           >
             <ChevronLeft className="w-5 h-5" />
@@ -62,7 +64,7 @@ export default function MainContent() {
             disabled={!canGoForward}
             className="w-8 h-8 rounded-full flex items-center justify-center transition
               disabled:opacity-25 disabled:cursor-not-allowed
-              enabled:hover:bg-white/10 text-white"
+              enabled:hover:bg-qs-accent/5 text-qs-text"
             aria-label="Suivant"
           >
             <ChevronRight className="w-5 h-5" />
@@ -86,7 +88,7 @@ export default function MainContent() {
           {searchQuery && (
             <button
               onClick={() => { setSearchQuery(""); setSearchResults(null); }}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-qs-text-dim hover:text-white transition"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-qs-text-dim hover:text-qs-text transition"
             >
               <X className="w-3.5 h-3.5" />
             </button>

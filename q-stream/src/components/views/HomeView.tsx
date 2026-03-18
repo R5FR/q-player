@@ -8,16 +8,41 @@ import AlbumCard from "../cards/AlbumCard";
 import PlaylistCard from "../cards/PlaylistCard";
 import TrackRow from "../cards/TrackRow";
 
-// ── Carte compacte "Récemment écouté" (style Spotify pill) ──────────────────
+// ── Titre de section editorial ───────────────────────────────────────────────
+function SectionHeading({
+  icon: Icon,
+  title,
+  badge,
+  iconColor = "text-qs-accent",
+}: {
+  icon: typeof Compass;
+  title: string;
+  badge?: React.ReactNode;
+  iconColor?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center gap-2.5">
+        <Icon className={`w-4 h-4 ${iconColor} opacity-80 flex-shrink-0`} />
+        <h2 className="text-xs font-semibold text-qs-text-dim uppercase tracking-[0.12em]">
+          {title}
+        </h2>
+        {badge && badge}
+      </div>
+    </div>
+  );
+}
+
+// ── Carte compacte "Récemment écouté" ────────────────────────────────────────
 function RecentCard({ track, onPlay }: { track: UnifiedTrack; onPlay: () => void }) {
   return (
-    <motion.button
-      whileHover={{ backgroundColor: "rgba(0,212,255,0.06)" }}
-      whileTap={{ scale: 0.97 }}
+    <button
       onClick={onPlay}
-      className="flex items-center gap-3 p-2 rounded-lg text-left w-full glass-light group relative overflow-hidden"
+      className="flex items-center gap-3 p-2 rounded-xl text-left w-full group relative overflow-hidden
+                 bg-qs-surface/60 hover:bg-qs-accent/5 border border-qs-text/5 hover:border-qs-accent/15
+                 transition-colors duration-150"
     >
-      <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 bg-qs-surface">
+      <div className="w-11 h-11 rounded-lg overflow-hidden flex-shrink-0 bg-qs-surface-light">
         {track.cover_url ? (
           <img src={track.cover_url} alt="" className="w-full h-full object-cover" />
         ) : (
@@ -25,15 +50,15 @@ function RecentCard({ track, onPlay }: { track: UnifiedTrack; onPlay: () => void
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-white truncate leading-snug">{track.title}</p>
-        <p className="text-xs text-qs-text-dim truncate">{track.artist}</p>
+        <p className="text-sm font-medium text-qs-text truncate leading-snug">{track.title}</p>
+        <p className="text-xs text-qs-text-dim truncate mt-0.5">{track.artist}</p>
       </div>
-      <Play className="w-4 h-4 text-qs-accent opacity-0 group-hover:opacity-100 flex-shrink-0 mr-1 transition" />
-    </motion.button>
+      <Play className="w-3.5 h-3.5 text-qs-accent opacity-0 group-hover:opacity-100 flex-shrink-0 mr-1 transition-opacity" />
+    </button>
   );
 }
 
-// ── Album card with dismiss button ──────────────────────────────────────────
+// ── Album card with dismiss button ───────────────────────────────────────────
 function DismissableAlbumCard({
   album,
   onClick,
@@ -51,11 +76,22 @@ function DismissableAlbumCard({
         title="Pas intéressé"
         className="absolute top-1.5 right-1.5 z-20 w-5 h-5 rounded-full bg-black/60 backdrop-blur-sm
                    flex items-center justify-center opacity-0 group-hover/wrap:opacity-100
-                   hover:bg-red-500/70 transition text-white/70 hover:text-white"
+                   hover:bg-qs-red/70 transition text-qs-text/70 hover:text-white"
       >
         <X className="w-3 h-3" />
       </button>
     </div>
+  );
+}
+
+// ── Spinner ───────────────────────────────────────────────────────────────────
+function Spinner({ cls }: { cls?: string }) {
+  return (
+    <motion.div
+      animate={{ rotate: 360 }}
+      transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+      className={`w-4 h-4 border-2 border-t-transparent rounded-full flex-shrink-0 ${cls ?? "border-qs-accent/50"}`}
+    />
   );
 }
 
@@ -66,27 +102,16 @@ export default function HomeView() {
     dismissedAlbums, dismissAlbum,
   } = useStore();
 
-  // Recommandations (discovery + last.fm)
   const [recoAlbums, setRecoAlbums] = useState<QobuzAlbumSimple[]>([]);
   const [recoLoading, setRecoLoading] = useState(true);
-
-  // Tes playlists
   const [userPlaylists, setUserPlaylists] = useState<QobuzPlaylist[]>([]);
-
-  // Tendances
   const [trendingTracks, setTrendingTracks] = useState<QobuzTrack[]>([]);
   const [trendingLoading, setTrendingLoading] = useState(true);
-
-  // Nouvelles sorties + éditorial
   const [featuredAlbums, setFeaturedAlbums] = useState<QobuzAlbumSimple[]>([]);
   const [editorialPlaylists, setEditorialPlaylists] = useState<QobuzPlaylist[]>([]);
   const [editorialLoading, setEditorialLoading] = useState(true);
-
-  // Albums d'artistes favoris (inconnus)
   const [knownArtistAlbums, setKnownArtistAlbums] = useState<QobuzAlbumSimple[]>([]);
   const [knownArtistLoading, setKnownArtistLoading] = useState(true);
-
-  // Exploration par genre
   const [genreAlbums, setGenreAlbums] = useState<QobuzAlbumSimple[]>([]);
   const [genreLoading, setGenreLoading] = useState(true);
 
@@ -101,23 +126,18 @@ export default function HomeView() {
 
   useEffect(() => {
     if (!session.logged_in || !lastfmUser) return;
-    // Layer Last.fm recent-playback recs on top of library discovery
     api.getRecentPlaybackRecs(lastfmUser.user_name)
       .then((albums) => setRecoAlbums((prev) => {
         const ids = new Set(prev.map((a) => a.id));
         return [...prev, ...albums.filter((a) => !ids.has(a.id))].slice(0, 12);
       }))
       .catch(() => {});
-    // Genre exploration requires Last.fm
     loadGenreExploration(lastfmUser.user_name);
   }, [session.logged_in, lastfmUser?.user_name]);
 
   const loadReco = async () => {
     setRecoLoading(true);
-    try {
-      const albums = await api.getLibraryDiscovery();
-      setRecoAlbums(albums.slice(0, 12));
-    } catch {}
+    try { setRecoAlbums((await api.getLibraryDiscovery()).slice(0, 12)); } catch {}
     setRecoLoading(false);
   };
 
@@ -172,72 +192,61 @@ export default function HomeView() {
     } catch (e) { console.error(e); }
   };
 
-  const Spinner = ({ cls }: { cls: string }) => (
-    <motion.div
-      animate={{ rotate: 360 }}
-      transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-      className={`w-4 h-4 border-2 ${cls} border-t-transparent rounded-full flex-shrink-0`}
-    />
-  );
-
-  // Filter dismissed albums from all recommendation lists
   const visibleReco = recoAlbums.filter((a) => !dismissedAlbums.includes(a.id));
   const visibleKnownArtist = knownArtistAlbums.filter((a) => !dismissedAlbums.includes(a.id));
   const visibleGenre = genreAlbums.filter((a) => !dismissedAlbums.includes(a.id));
 
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Bonjour" : hour < 18 ? "Bon après-midi" : "Bonsoir";
+
   return (
-    <div className="p-8 space-y-10">
+    <div className="p-7 space-y-9 pb-12">
       {/* ── En-tête ── */}
-      <div>
-        <motion.h1
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-3xl font-bold text-white"
-        >
-          Bonjour{session.user_name ? `, ${session.user_name}` : ""}
-        </motion.h1>
-        <p className="text-qs-text-dim mt-1 text-sm">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
+        <h1 className="text-2xl font-semibold text-qs-text tracking-tight">
+          {greeting}{session.user_name ? <>, <span className="text-qs-accent">{session.user_name}</span></> : ""}
+        </h1>
+        <p className="text-qs-text-dim text-xs mt-1 tracking-wide">
           {new Date().toLocaleDateString("fr-FR", { weekday: "long", month: "long", day: "numeric" })}
         </p>
-      </div>
+      </motion.div>
 
-      {/* ── TOP : Récemment écouté (pills) ── */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <Clock className="w-4 h-4 text-qs-text-dim" />
-          <h2 className="text-base font-semibold text-white">Récemment écouté</h2>
-        </div>
-        {recentlyPlayed.length === 0 ? (
-          <p className="text-sm text-qs-text-dim py-2">
-            Lance une écoute pour retrouver tes morceaux ici.
-          </p>
-        ) : (
+      {/* ── TOP : Récemment écouté ── */}
+      {recentlyPlayed.length > 0 && (
+        <section>
+          <SectionHeading icon={Clock} title="Récemment écouté" />
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             {recentlyPlayed.map((track) => (
               <RecentCard key={track.id} track={track} onPlay={() => playRecentItem(track)} />
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       {/* ── Recommandations ── */}
       <section>
-        <div className="flex items-center gap-2 mb-4">
-          <Compass className="w-5 h-5 text-qs-accent" />
-          <h2 className="text-xl font-semibold text-white">Recommandations</h2>
-          {lastfmUser && (
-            <span className="text-[10px] text-qs-text-dim px-1.5 py-0.5 rounded bg-white/5">
-              via Last.fm
-            </span>
-          )}
-        </div>
+        <SectionHeading
+          icon={Compass}
+          title="Recommandations"
+          badge={
+            lastfmUser && (
+              <span className="text-[9px] text-qs-text-dim px-1.5 py-0.5 rounded bg-qs-text/5 tracking-wider uppercase ml-1">
+                Last.fm
+              </span>
+            )
+          }
+        />
         {recoLoading ? (
           <div className="flex items-center gap-3 text-qs-text-dim text-sm py-3">
-            <Spinner cls="border-qs-accent/50" />
+            <Spinner />
             Chargement…
           </div>
         ) : visibleReco.length > 0 ? (
-          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {visibleReco.slice(0, 12).map((album) => (
               <DismissableAlbumCard
                 key={album.id}
@@ -257,11 +266,12 @@ export default function HomeView() {
       {/* ── Tes playlists ── */}
       {userPlaylists.length > 0 && (
         <section>
-          <div className="flex items-center gap-2 mb-4">
-            <ListMusic className="w-5 h-5 text-qs-accent-2" />
-            <h2 className="text-xl font-semibold text-white">Tes playlists</h2>
-          </div>
-          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <SectionHeading
+            icon={ListMusic}
+            title="Tes playlists"
+            iconColor="text-qs-accent-2"
+          />
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {userPlaylists.map((pl) => (
               <PlaylistCard key={pl.id} playlist={pl} onClick={() => openPlaylist(pl.id)} />
             ))}
@@ -272,14 +282,16 @@ export default function HomeView() {
       {/* ── Albums d'artistes favoris ── */}
       {!knownArtistLoading && visibleKnownArtist.length > 0 && (
         <section>
-          <div className="flex items-center gap-2 mb-4">
-            <Music2 className="w-5 h-5 text-qs-accent" />
-            <h2 className="text-xl font-semibold text-white">Artistes favoris</h2>
-            <span className="text-xs text-qs-text-dim ml-1 px-1.5 py-0.5 rounded bg-white/5">
-              albums à découvrir
-            </span>
-          </div>
-          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <SectionHeading
+            icon={Music2}
+            title="Artistes favoris"
+            badge={
+              <span className="text-[9px] text-qs-text-dim px-1.5 py-0.5 rounded bg-qs-text/5 tracking-wider uppercase ml-1">
+                à découvrir
+              </span>
+            }
+          />
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {visibleKnownArtist.slice(0, 12).map((album) => (
               <DismissableAlbumCard
                 key={album.id}
@@ -295,14 +307,17 @@ export default function HomeView() {
       {/* ── Exploration par genre ── */}
       {lastfmUser && !genreLoading && visibleGenre.length > 0 && (
         <section>
-          <div className="flex items-center gap-2 mb-4">
-            <Sparkles className="w-5 h-5 text-qs-accent-2" />
-            <h2 className="text-xl font-semibold text-white">Explorer tes genres</h2>
-            <span className="text-xs text-qs-text-dim ml-1 px-1.5 py-0.5 rounded bg-white/5">
-              via Last.fm + MusicBrainz
-            </span>
-          </div>
-          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <SectionHeading
+            icon={Sparkles}
+            title="Explorer tes genres"
+            iconColor="text-qs-accent-2"
+            badge={
+              <span className="text-[9px] text-qs-text-dim px-1.5 py-0.5 rounded bg-qs-text/5 tracking-wider uppercase ml-1">
+                MusicBrainz
+              </span>
+            }
+          />
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {visibleGenre.slice(0, 12).map((album) => (
               <DismissableAlbumCard
                 key={album.id}
@@ -317,18 +332,23 @@ export default function HomeView() {
 
       {/* ── Tendances ── */}
       <section>
-        <div className="flex items-center gap-2 mb-4">
-          <Flame className="w-5 h-5 text-orange-400" />
-          <h2 className="text-xl font-semibold text-white">Tendances</h2>
-          <span className="text-xs text-qs-text-dim ml-1 px-1.5 py-0.5 rounded bg-white/5">via Last.fm</span>
-        </div>
+        <SectionHeading
+          icon={Flame}
+          title="Tendances"
+          iconColor="text-orange-400"
+          badge={
+            <span className="text-[9px] text-qs-text-dim px-1.5 py-0.5 rounded bg-qs-text/5 tracking-wider uppercase ml-1">
+              Last.fm
+            </span>
+          }
+        />
         {trendingLoading ? (
           <div className="flex items-center gap-3 text-qs-text-dim text-sm py-4">
             <Spinner cls="border-orange-400/50" />
             Chargement des tendances…
           </div>
         ) : trendingTracks.length > 0 ? (
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {trendingTracks.slice(0, 10).map((track) => (
               <TrackRow key={track.id} track={track} />
             ))}
@@ -341,11 +361,8 @@ export default function HomeView() {
       {/* ── Nouvelles sorties ── */}
       {!editorialLoading && featuredAlbums.length > 0 && (
         <section>
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp className="w-5 h-5 text-qs-accent" />
-            <h2 className="text-xl font-semibold text-white">Nouvelles sorties</h2>
-          </div>
-          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <SectionHeading icon={TrendingUp} title="Nouvelles sorties" />
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {featuredAlbums.slice(0, 12).map((album) => (
               <AlbumCard key={album.id} album={album} onClick={() => openAlbum(album.id)} />
             ))}
@@ -356,11 +373,12 @@ export default function HomeView() {
       {/* ── Sélection éditoriale ── */}
       {!editorialLoading && editorialPlaylists.length > 0 && (
         <section>
-          <div className="flex items-center gap-2 mb-4">
-            <Star className="w-5 h-5 text-amber-400" />
-            <h2 className="text-xl font-semibold text-white">Sélection éditoriale</h2>
-          </div>
-          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <SectionHeading
+            icon={Star}
+            title="Sélection éditoriale"
+            iconColor="text-amber-400"
+          />
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {editorialPlaylists.slice(0, 12).map((pl) => (
               <PlaylistCard key={pl.id} playlist={pl} onClick={() => openPlaylist(pl.id)} />
             ))}
@@ -370,11 +388,7 @@ export default function HomeView() {
 
       {editorialLoading && (
         <div className="flex justify-center py-8">
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-            className="w-6 h-6 border-2 border-qs-accent border-t-transparent rounded-full"
-          />
+          <Spinner />
         </div>
       )}
     </div>
