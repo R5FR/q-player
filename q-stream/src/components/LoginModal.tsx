@@ -47,12 +47,13 @@ export default function LoginModal() {
             <motion.div
               animate={{ rotate: 360 }}
               transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
-              className="w-16 h-16 rounded-full bg-gradient-to-br from-qs-accent to-qs-accent-2 flex items-center justify-center mb-4"
+              className="w-16 h-16 rounded-full border-2 border-qs-accent/40 bg-qs-accent/8 flex items-center justify-center mb-5"
+              style={{ boxShadow: "0 0 28px rgb(var(--qs-accent) / 0.2)" }}
             >
-              <Disc3 className="w-8 h-8 text-white" />
+              <Disc3 className="w-8 h-8 text-qs-accent" />
             </motion.div>
-            <h1 className="text-3xl font-bold text-gradient">Q-Stream</h1>
-            <p className="text-qs-text-dim text-sm mt-1">
+            <h1 className="font-display text-4xl tracking-widest text-qs-text">Q-STREAM</h1>
+            <p className="font-condensed text-[10px] font-medium text-qs-accent tracking-[0.25em] uppercase mt-1">
               Hi-Res Music Streaming
             </p>
           </div>
@@ -93,7 +94,8 @@ export default function LoginModal() {
             <button
               type="submit"
               disabled={loading || !email || !password}
-              className="w-full py-3 bg-gradient-to-r from-qs-accent to-qs-accent-2 rounded-xl font-semibold text-white hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full py-3 bg-qs-accent rounded-xl font-condensed font-semibold text-sm uppercase tracking-widest text-black hover:bg-qs-accent-light transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              style={{ boxShadow: "0 0 20px rgb(var(--qs-accent) / 0.3)" }}
             >
               {loading ? (
                 <>

@@ -13,6 +13,7 @@ import {
   Repeat,
   Moon,
   Monitor,
+  Maximize2,
 } from "lucide-react";
 import { useStore } from "../store";
 import * as api from "../api";
@@ -24,15 +25,14 @@ export default function PlayerBar() {
     setIsSeeking,
     audioDevices, setAudioDevices, selectedDevice, setSelectedDevice,
     sleepTimerEndMs, setSleepTimer,
+    setIsFullscreen,
   } = useStore();
 
   const [seekOverride, setSeekOverride] = useState<number | null>(null);
   const seekClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Tracks the latest drag value independently of React render cycle
   const seekValueRef = useRef<number>(0);
   const prevCoverRef = useRef<string | null>(null);
 
-  // Local volume for immediate UI feedback (avoids 500ms polling lag)
   const [localVolume, setLocalVolume] = useState(playback.volume);
   const [prevVolume, setPrevVolume] = useState(0.7);
   const [showDeviceMenu, setShowDeviceMenu] = useState(false);
@@ -43,17 +43,14 @@ export default function PlayerBar() {
 
   const track = playback.current_track;
 
-  // Keep localVolume in sync with backend polling
   useEffect(() => {
     setLocalVolume(playback.volume);
   }, [playback.volume]);
 
-  // Load audio devices on mount
   useEffect(() => {
     api.getAudioDevices().then(setAudioDevices).catch(() => {});
   }, []);
 
-  // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (deviceMenuRef.current && !deviceMenuRef.current.contains(e.target as Node))
@@ -65,7 +62,6 @@ export default function PlayerBar() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Extract dominant color when cover changes
   useEffect(() => {
     const coverUrl = track?.cover_url;
     if (coverUrl && coverUrl !== prevCoverRef.current) {
@@ -106,7 +102,6 @@ export default function PlayerBar() {
     }
   };
 
-  // Seek — onPointerDown = lock polling, onChange = live preview, onPointerUp = commit
   const handleSeekStart = () => {
     setIsSeeking(true);
   };
@@ -204,82 +199,144 @@ export default function PlayerBar() {
   const progress = playback.duration_ms > 0 ? (currentPos / playback.duration_ms) * 100 : 0;
 
   return (
-    <div className="glass-heavy border-t border-qs-text/8 px-4 py-2 relative">
-      <div className="flex items-center gap-4 h-[72px]">
-        {/* Track Info */}
-        <div className="flex items-center gap-3 w-[280px] min-w-[200px]">
+    <div className="glass-heavy border-t border-qs-text/[0.06] px-5 py-0 relative">
+      {/* Lime accent line at top */}
+      <div
+        className="absolute top-0 left-0 right-0 h-px transition-all duration-1000"
+        style={{
+          background: `linear-gradient(90deg, transparent 0%, rgb(var(--qs-accent) / 0.5) ${progress}%, rgb(var(--qs-text) / 0.06) ${progress}%, transparent 100%)`,
+        }}
+      />
+
+      <div className="flex items-center gap-5 h-[80px]">
+
+        {/* ── Track Info ── */}
+        <div className="flex items-center gap-3 w-[270px] min-w-[200px]">
           {track ? (
             <>
-              <motion.div layoutId="player-cover" className="w-14 h-14 rounded-lg overflow-hidden shadow-lg flex-shrink-0">
+              <motion.div
+                layoutId="player-cover"
+                onClick={() => setIsFullscreen(true)}
+                className="w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 relative cursor-pointer group/cover"
+                style={{
+                  boxShadow: playback.is_playing
+                    ? "0 0 18px rgb(var(--qs-accent) / 0.25), 0 4px 16px rgb(0 0 0 / 0.5)"
+                    : "0 4px 16px rgb(0 0 0 / 0.5)",
+                  transition: "box-shadow 0.6s ease",
+                }}
+              >
                 {track.cover_url ? (
-                  <img src={track.cover_url} alt={track.album} className="w-full h-full object-cover" />
+                  <img
+                    src={track.cover_url}
+                    alt={track.album}
+                    className="w-full h-full object-cover"
+                  />
                 ) : (
                   <div className="w-full h-full bg-qs-surface flex items-center justify-center">
                     <span className="text-2xl">🎵</span>
                   </div>
                 )}
+                {/* Playing indicator overlay */}
+                {playback.is_playing && (
+                  <div className="absolute inset-0 border border-qs-accent/20 rounded-lg pointer-events-none" />
+                )}
+                {/* Fullscreen hover overlay */}
+                <div className="absolute inset-0 bg-black/55 opacity-0 group-hover/cover:opacity-100 transition-opacity duration-150 flex items-center justify-center pointer-events-none">
+                  <Maximize2 className="w-4 h-4 text-white" />
+                </div>
               </motion.div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-qs-text truncate">{track.title}</p>
-                <p className="text-xs text-qs-text-dim truncate">{track.artist}</p>
-                <div className="mt-0.5">{qualityBadge()}</div>
+              <div className="min-w-0 flex-1">
+                <p className="font-sans text-sm font-medium text-qs-text truncate leading-snug">
+                  {track.title}
+                </p>
+                <p className="font-sans text-xs text-qs-text-dim truncate mt-0.5">
+                  {track.artist}
+                </p>
+                <div className="mt-1">{qualityBadge()}</div>
               </div>
             </>
           ) : (
             <div className="flex items-center gap-3">
-              <div className="w-14 h-14 rounded-lg bg-qs-surface flex items-center justify-center">
-                <span className="text-2xl opacity-30">🎵</span>
+              <div className="w-14 h-14 rounded-lg bg-qs-surface border border-qs-text/6 flex items-center justify-center flex-shrink-0">
+                <span className="text-2xl opacity-20">🎵</span>
               </div>
-              <p className="text-sm text-qs-text-dim">No track playing</p>
+              <p className="font-condensed text-xs uppercase tracking-wider text-qs-text-dim">
+                Aucune piste
+              </p>
             </div>
           )}
         </div>
 
-        {/* Controls & Progress */}
-        <div className="flex-1 flex flex-col items-center gap-1.5">
-          {/* Buttons */}
-          <div className="flex items-center gap-4">
-            <button
+        {/* ── Controls & Progress ── */}
+        <div className="flex-1 flex flex-col items-center gap-2">
+          {/* Transport buttons */}
+          <div className="flex items-center gap-5">
+            <motion.button
+              whileTap={{ scale: 0.9 }}
               onClick={handleShuffle}
               title="Shuffle"
-              className={`transition relative ${shuffle ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"}`}
+              className={`relative transition-colors ${
+                shuffle ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"
+              }`}
             >
               <Shuffle className="w-4 h-4" />
-              {shuffle && <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-qs-accent" />}
-            </button>
-            <button onClick={handlePrev} className="text-qs-text-dim hover:text-qs-text transition">
+              {shuffle && (
+                <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-qs-accent shadow-neon-sm" />
+              )}
+            </motion.button>
+
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              onClick={handlePrev}
+              className="text-qs-text-dim hover:text-qs-text transition-colors"
+            >
               <SkipBack className="w-5 h-5" />
-            </button>
+            </motion.button>
+
+            {/* Main play/pause */}
             <motion.button
               whileTap={{ scale: 0.9 }}
               onClick={togglePlay}
-              className="btn-play-cyber w-9 h-9 rounded-full flex items-center justify-center"
+              className="btn-play-cyber w-11 h-11 rounded-full flex items-center justify-center"
             >
               {playback.is_playing ? (
-                <Pause className="w-4 h-4 text-qs-accent" />
+                <Pause className="w-4.5 h-4.5 text-qs-accent" style={{ width: 18, height: 18 }} />
               ) : (
-                <Play className="w-4 h-4 text-qs-accent ml-0.5" />
+                <Play className="text-qs-accent ml-0.5" style={{ width: 18, height: 18 }} />
               )}
             </motion.button>
-            <button onClick={handleNext} className="text-qs-text-dim hover:text-qs-text transition">
+
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              onClick={handleNext}
+              className="text-qs-text-dim hover:text-qs-text transition-colors"
+            >
               <SkipForward className="w-5 h-5" />
-            </button>
-            <button
+            </motion.button>
+
+            <motion.button
+              whileTap={{ scale: 0.9 }}
               onClick={cycleRepeat}
               title={repeatMode === "off" ? "Repeat off" : repeatMode === "all" ? "Repeat all" : "Repeat one"}
-              className={`transition relative ${repeatMode !== "off" ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"}`}
+              className={`relative transition-colors ${
+                repeatMode !== "off" ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"
+              }`}
             >
               <Repeat className="w-4 h-4" />
               {repeatMode === "one" && (
-                <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold leading-none bg-qs-accent text-black rounded-full w-3 h-3 flex items-center justify-center">1</span>
+                <span className="absolute -top-1.5 -right-1.5 font-mono text-[7px] font-bold leading-none bg-qs-accent text-black rounded-full w-3.5 h-3.5 flex items-center justify-center">
+                  1
+                </span>
               )}
-              {repeatMode !== "off" && <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-qs-accent" />}
-            </button>
+              {repeatMode !== "off" && (
+                <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-qs-accent shadow-neon-sm" />
+              )}
+            </motion.button>
           </div>
 
           {/* Progress / seek */}
-          <div className="w-full max-w-[600px] flex items-center gap-2">
-            <span className="text-[10px] text-qs-text-dim w-10 text-right select-none font-mono">
+          <div className="w-full max-w-[580px] flex items-center gap-3">
+            <span className="font-mono text-[10px] text-qs-text-dim w-9 text-right select-none tabular-nums">
               {formatTime(currentPos)}
             </span>
             <div className="flex-1 relative progress-track-container group">
@@ -298,26 +355,30 @@ export default function PlayerBar() {
                 className="absolute inset-0 w-full opacity-0 cursor-pointer"
                 style={{ height: "100%", top: 0 }}
               />
+              {/* Seek thumb */}
               <div
-                className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                 style={{
-                  left: `calc(${progress}% - 5px)`,
+                  left: `calc(${progress}% - 6px)`,
                   background: "rgb(var(--qs-accent))",
-                  boxShadow: "0 0 8px rgb(var(--qs-accent) / 0.75)",
+                  boxShadow: "0 0 10px rgb(var(--qs-accent) / 0.8)",
                 }}
               />
             </div>
-            <span className="text-[10px] text-qs-text-dim w-10 select-none font-mono">
+            <span className="font-mono text-[10px] text-qs-text-dim w-9 select-none tabular-nums">
               {formatTime(playback.duration_ms)}
             </span>
           </div>
         </div>
 
-        {/* Right controls: Volume + EQ + Device + Sleep */}
-        <div className="flex items-center gap-3 w-[240px] justify-end">
+        {/* ── Right controls ── */}
+        <div className="flex items-center gap-3.5 w-[240px] justify-end">
           {/* Volume */}
           <div className="flex items-center gap-1.5">
-            <button onClick={handleMuteToggle} className="text-qs-text-dim hover:text-qs-text transition flex-shrink-0">
+            <button
+              onClick={handleMuteToggle}
+              className="text-qs-text-dim hover:text-qs-text transition-colors flex-shrink-0"
+            >
               <VolumeIcon className="w-4 h-4" />
             </button>
             <input
@@ -329,7 +390,7 @@ export default function PlayerBar() {
               onChange={handleVolume}
               className="volume-slider w-20 cursor-pointer"
               style={{
-                background: `linear-gradient(to right, rgb(var(--qs-accent)) ${localVolume * 100}%, rgb(var(--qs-accent) / 0.14) ${localVolume * 100}%)`,
+                background: `linear-gradient(to right, rgb(var(--qs-accent)) ${localVolume * 100}%, rgb(var(--qs-accent) / 0.12) ${localVolume * 100}%)`,
               }}
             />
           </div>
@@ -339,27 +400,35 @@ export default function PlayerBar() {
             <button
               onClick={() => setShowDeviceMenu(!showDeviceMenu)}
               title="Audio output"
-              className={`transition ${selectedDevice !== "Default" ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"}`}
+              className={`transition-colors ${
+                selectedDevice !== "Default" ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"
+              }`}
             >
               <Monitor className="w-4 h-4" />
             </button>
             <div
-              className={`absolute bottom-full right-0 mb-2 w-56 glass rounded-xl border border-qs-text/8 overflow-hidden z-50
+              className={`absolute bottom-full right-0 mb-3 w-56 glass rounded-xl overflow-hidden z-50
                 transition-all duration-150 origin-bottom-right
                 ${showDeviceMenu ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
             >
-              <div className="px-3 py-2 border-b border-qs-text/5">
-                <p className="text-[10px] text-qs-text-dim uppercase tracking-wider font-semibold">Audio Output</p>
+              <div className="px-3 py-2 border-b border-qs-text/[0.07]">
+                <p className="font-condensed text-[9px] font-semibold text-qs-text-dim uppercase tracking-[0.18em]">
+                  Sortie audio
+                </p>
               </div>
               {audioDevices.map((dev) => (
                 <button
                   key={dev}
                   onClick={() => handleDeviceSelect(dev)}
-                  className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center gap-2 ${
-                    selectedDevice === dev ? "text-qs-accent bg-qs-accent/5" : "text-qs-text-dim hover:text-qs-text hover:bg-qs-accent/5"
+                  className={`w-full text-left px-3 py-2 font-sans text-xs transition-colors flex items-center gap-2 ${
+                    selectedDevice === dev
+                      ? "text-qs-accent bg-qs-accent/5"
+                      : "text-qs-text-dim hover:text-qs-text hover:bg-qs-accent/5"
                   }`}
                 >
-                  {selectedDevice === dev && <span className="w-1 h-1 rounded-full bg-qs-accent flex-shrink-0" />}
+                  {selectedDevice === dev && (
+                    <span className="w-1 h-1 rounded-full bg-qs-accent flex-shrink-0 shadow-neon-sm" />
+                  )}
                   <span className="truncate">{dev}</span>
                 </button>
               ))}
@@ -371,29 +440,35 @@ export default function PlayerBar() {
             <button
               onClick={() => setShowSleepMenu(!showSleepMenu)}
               title="Sleep timer"
-              className={`transition relative ${sleepTimerEndMs ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"}`}
+              className={`relative transition-colors ${
+                sleepTimerEndMs ? "text-qs-accent" : "text-qs-text-dim hover:text-qs-text"
+              }`}
             >
               <Moon className="w-4 h-4" />
               {sleepTimerEndMs && (
-                <span className="absolute -top-2 -right-2 text-[8px] font-bold bg-qs-accent text-black rounded-full px-1 leading-tight">
+                <span className="absolute -top-2 -right-2 font-mono text-[8px] font-bold bg-qs-accent text-black rounded-full px-1 leading-tight">
                   {sleepRemaining()}
                 </span>
               )}
             </button>
             <div
-              className={`absolute bottom-full right-0 mb-2 w-40 glass rounded-xl border border-qs-text/8 overflow-hidden z-50
+              className={`absolute bottom-full right-0 mb-3 w-40 glass rounded-xl overflow-hidden z-50
                 transition-all duration-150 origin-bottom-right
                 ${showSleepMenu ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
             >
-              <div className="px-3 py-2 border-b border-qs-text/5">
-                <p className="text-[10px] text-qs-text-dim uppercase tracking-wider font-semibold">Sleep Timer</p>
+              <div className="px-3 py-2 border-b border-qs-text/[0.07]">
+                <p className="font-condensed text-[9px] font-semibold text-qs-text-dim uppercase tracking-[0.18em]">
+                  Sleep Timer
+                </p>
               </div>
               {[null, 15, 30, 45, 60].map((min) => (
                 <button
                   key={min ?? "off"}
                   onClick={() => handleSleepTimer(min)}
-                  className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center gap-2 ${
-                    (min === null && !sleepTimerEndMs) ? "text-qs-accent bg-qs-accent/5" : "text-qs-text-dim hover:text-qs-text hover:bg-qs-accent/5"
+                  className={`w-full text-left px-3 py-2 font-sans text-xs transition-colors flex items-center gap-2 ${
+                    min === null && !sleepTimerEndMs
+                      ? "text-qs-accent bg-qs-accent/5"
+                      : "text-qs-text-dim hover:text-qs-text hover:bg-qs-accent/5"
                   }`}
                 >
                   {min === null ? "Off" : `${min} minutes`}
@@ -403,7 +478,6 @@ export default function PlayerBar() {
           </div>
         </div>
       </div>
-
     </div>
   );
 }

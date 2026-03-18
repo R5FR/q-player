@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { AnimatePresence } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store";
 import * as api from "./api";
@@ -6,6 +7,7 @@ import Sidebar from "./components/Sidebar";
 import MainContent from "./components/MainContent";
 import PlayerBar from "./components/PlayerBar";
 import LoginModal from "./components/LoginModal";
+import FullscreenPlayer from "./components/FullscreenPlayer";
 
 export default function App() {
   const {
@@ -14,6 +16,7 @@ export default function App() {
     setRecentlyPlayed, setDismissedAlbums, setSearchHistory,
     isSeeking, sleepTimerEndMs, setSleepTimer,
     isDarkMode,
+    isFullscreen, setIsFullscreen,
   } = useStore();
 
   // Apply dark/light class on <html> for CSS variable theming
@@ -144,37 +147,54 @@ export default function App() {
   }, [session.logged_in]);
 
   const [r, g, b] = dominantColor;
-  // Crush album colour to near-black so it barely tints the dark background
-  const dr = Math.floor(r * 0.06) + 4;
-  const dg = Math.floor(g * 0.05) + 4;
-  const db = Math.floor(b * 0.10) + 10;
+
+  // Dark: crush album colour to near-black so it barely tints the void background
+  // Light: lift album colour toward warm parchment (#f5f0e8 = 245 240 232)
+  const bgColor = isDarkMode
+    ? `rgb(${Math.floor(r * 0.06) + 4}, ${Math.floor(g * 0.05) + 4}, ${Math.floor(b * 0.10) + 10})`
+    : `rgb(${Math.min(255, Math.floor(245 - (255 - r) * 0.06))}, ${Math.min(255, Math.floor(240 - (255 - g) * 0.05))}, ${Math.min(255, Math.floor(232 - (255 - b) * 0.04))})`;
+
+  const bgImage = isDarkMode
+    ? `
+        radial-gradient(ellipse at 15% 60%, rgb(var(--qs-accent) / 0.04) 0%, transparent 55%),
+        radial-gradient(ellipse at 85% 15%, rgb(var(--qs-accent-2) / 0.04) 0%, transparent 55%),
+        radial-gradient(ellipse at 50% 90%, rgba(${Math.floor(r * 0.4)}, ${Math.floor(g * 0.35)}, ${Math.floor(b * 0.5)}, 0.05) 0%, transparent 50%)
+      `
+    : `
+        radial-gradient(ellipse at 20% 45%, rgba(${Math.floor(r * 0.3)}, ${Math.floor(g * 0.28)}, ${Math.floor(b * 0.22)}, 0.06) 0%, transparent 55%),
+        radial-gradient(ellipse at 78% 20%, rgb(var(--qs-accent) / 0.04) 0%, transparent 45%),
+        radial-gradient(ellipse at 50% 95%, rgba(${Math.floor(r * 0.2)}, ${Math.floor(g * 0.18)}, ${Math.floor(b * 0.15)}, 0.04) 0%, transparent 40%)
+      `;
 
   return (
-    <div
-      className="h-screen w-screen flex flex-col dynamic-bg"
-      style={{
-        backgroundColor: `rgb(${dr}, ${dg}, ${db})`,
-        backgroundImage: `
-          radial-gradient(ellipse at 15% 60%, rgb(var(--qs-accent) / 0.04) 0%, transparent 55%),
-          radial-gradient(ellipse at 85% 15%, rgb(var(--qs-accent-2) / 0.04) 0%, transparent 55%),
-          radial-gradient(ellipse at 50% 90%, rgba(${Math.floor(r * 0.4)}, ${Math.floor(g * 0.35)}, ${Math.floor(b * 0.5)}, 0.05) 0%, transparent 50%)
-        `,
-      }}
-    >
-      {!session.logged_in ? (
-        /* Login gate — don't render main content until authenticated */
-        <LoginModal />
-      ) : (
-        <>
-          {/* Main layout */}
-          <div className="flex flex-1 overflow-hidden">
-            <Sidebar />
-            <MainContent />
-          </div>
-          {/* Player bar */}
-          <PlayerBar />
-        </>
-      )}
-    </div>
+    <>
+      {/* ── Fullscreen player — rendered at root level, above everything ── */}
+      <AnimatePresence>
+        {isFullscreen && (
+          <FullscreenPlayer onClose={() => setIsFullscreen(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* ── Normal app layout ── */}
+      <div
+        className="h-screen w-screen flex flex-col dynamic-bg"
+        style={{ backgroundColor: bgColor, backgroundImage: bgImage }}
+      >
+        {!session.logged_in ? (
+          /* Login gate — don't render main content until authenticated */
+          <LoginModal />
+        ) : (
+          <>
+            {/* Main layout */}
+            <div className="flex flex-1 overflow-hidden">
+              <Sidebar />
+              <MainContent />
+            </div>
+            {/* Player bar */}
+            <PlayerBar />
+          </>
+        )}
+      </div>
+    </>
   );
 }

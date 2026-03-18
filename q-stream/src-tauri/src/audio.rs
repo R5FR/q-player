@@ -283,7 +283,7 @@ unsafe impl Send for AudioPlayer {}
 unsafe impl Sync for AudioPlayer {}
 
 impl AudioPlayer {
-    pub fn new() -> (Self, mpsc::Receiver<PlayerEvent>) {
+    pub fn new() -> (Self, mpsc::Receiver<PlayerEvent>, Arc<parking_lot::Mutex<Vec<f32>>>) {
         let (tx, rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
 
@@ -310,6 +310,7 @@ impl AudioPlayer {
             .spawn(move || decoder_thread(rx, shared, event_tx))
             .expect("Failed to spawn audio decoder thread");
 
+        let spectrum_arc = spectrum.clone();
         (
             Self {
                 command_tx: tx,
@@ -327,6 +328,7 @@ impl AudioPlayer {
                 spectrum,
             },
             event_rx,
+            spectrum_arc,
         )
     }
 
@@ -540,10 +542,19 @@ fn decoder_thread(
     let mut last_spectrum_emit = Instant::now();
 
     loop {
-        let buffer_full = sink.as_ref().map(|s| s.len() > 20).unwrap_or(false);
+        let buffer_full = sink.as_ref().map(|s| s.len() > 4).unwrap_or(false);
         let should_wait = dec_state.is_none() || paused || buffer_full;
 
         let cmd = if should_wait {
+            // Re-emit last known spectrum while idle so the frontend never
+            // sees a gap (bars freeze rather than disappear).
+            if last_spectrum_emit.elapsed() >= Duration::from_millis(33) {
+                let last = shared.spectrum.lock().clone();
+                if last.iter().any(|&v| v > 0.001) {
+                    let _ = event_tx.send(PlayerEvent::Spectrum(last));
+                    last_spectrum_emit = Instant::now();
+                }
+            }
             match command_rx.recv_timeout(Duration::from_millis(25)) {
                 Ok(cmd) => Some(cmd),
                 Err(mpsc::RecvTimeoutError::Timeout) => None,
@@ -844,7 +855,8 @@ fn decoder_thread(
                                         SPECTRUM_BINS,
                                         &fft_forward,
                                     );
-                                    *shared.spectrum.lock() = spectrum;
+                                    *shared.spectrum.lock() = spectrum.clone();
+                                    let _ = event_tx.send(PlayerEvent::Spectrum(spectrum));
                                     last_spectrum_emit = Instant::now();
                                 }
                                 // 50% overlap hop

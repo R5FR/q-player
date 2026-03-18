@@ -37,9 +37,9 @@ export default function EqPanel() {
   };
 
   const EqGradient = (gain: number) => {
-    if (gain === 0) return "rgba(0,212,255,0.15)";
-    if (gain > 0) return `linear-gradient(to top, #00d4ff ${Math.abs(gain) / 12 * 100}%, rgba(0,212,255,0.15) ${Math.abs(gain) / 12 * 100}%)`;
-    return `linear-gradient(to bottom, #8b5cf6 ${Math.abs(gain) / 12 * 100}%, rgba(139,92,246,0.15) ${Math.abs(gain) / 12 * 100}%)`;
+    if (gain === 0) return "rgba(183,255,46,0.12)";
+    if (gain > 0) return `linear-gradient(to top, rgb(183,255,46) ${Math.abs(gain) / 12 * 100}%, rgba(183,255,46,0.12) ${Math.abs(gain) / 12 * 100}%)`;
+    return `linear-gradient(to bottom, rgb(255,100,50) ${Math.abs(gain) / 12 * 100}%, rgba(255,100,50,0.12) ${Math.abs(gain) / 12 * 100}%)`;
   };
 
   return (
@@ -81,7 +81,7 @@ export default function EqPanel() {
           <div key={band.freq} className="flex flex-col items-center gap-2">
             {/* Gain label */}
             <span className={`text-[10px] font-mono font-semibold w-8 text-center ${
-              band.gain > 0 ? "text-qs-accent" : band.gain < 0 ? "text-purple-400" : "text-qs-text-dim"
+              band.gain > 0 ? "text-qs-accent" : band.gain < 0 ? "text-qs-accent-2" : "text-qs-text-dim"
             }`}>
               {band.gain > 0 ? "+" : ""}{band.gain.toFixed(1)}
             </span>

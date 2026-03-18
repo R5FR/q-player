@@ -3,41 +3,45 @@
 @tailwind utilities;
 
 /* ══════════════════════════════════════════════════
-   THEME TOKENS — dark (default) + light override
-   Space-separated RGB values enable Tailwind opacity
-   modifiers: bg-qs-accent/10 → rgb(var(--qs-accent)/0.1)
+   CHROMATIC BLACK — Design System
+   Concept: Precision audiophile instrument × futuristic lab HUD
+   Accent: Electric Lime #B7FF2E (VU-meter professional green)
    ══════════════════════════════════════════════════ */
 :root {
-  /* Dark theme — deep navy-black */
-  --qs-bg:           5 8 17;        /* #050811 */
-  --qs-surface:      10 15 30;      /* #0a0f1e */
-  --qs-surface-2:    14 20 38;      /* #0e1426 */
-  --qs-surface-3:    20 30 56;      /* #141e38 */
-  --qs-accent:       0 196 228;     /* #00c4e4 — refined cyan */
-  --qs-accent-2:     124 85 232;    /* #7c55e8 — electric violet */
-  --qs-accent-light: 103 222 242;   /* #67def2 */
-  --qs-green:        0 220 150;     /* #00dc96 */
-  --qs-red:          255 51 88;     /* #ff3358 */
-  --qs-text:         218 230 246;   /* #dae6f6 */
-  --qs-text-dim:     62 90 118;     /* #3e5a76 */
+  /* Dark theme — chromatic black */
+  --qs-bg:           4 4 8;          /* #040408 — near void */
+  --qs-surface:      10 10 16;       /* #0a0a10 */
+  --qs-surface-2:    16 16 24;       /* #101018 */
+  --qs-surface-3:    26 26 38;       /* #1a1a26 */
+  --qs-accent:       183 255 46;     /* #b7ff2e — electric lime */
+  --qs-accent-2:     255 100 50;     /* #ff6432 — neon orange */
+  --qs-accent-light: 214 255 130;    /* #d6ff82 */
+  --qs-green:        0 230 155;      /* #00e69b — teal mint */
+  --qs-red:          255 50 80;      /* #ff3250 */
+  --qs-text:         232 228 248;    /* #e8e4f8 — near white, slight violet cast */
+  --qs-text-dim:     82 78 106;      /* #524e6a */
 
-  /* Glass colours (raw, for use in CSS-native rgba) */
-  --glass-bg:        10 15 30;
+  --glass-bg:        10 10 16;
   --glass-border:    255 255 255;
 }
 
 html.light {
-  --qs-bg:           237 243 250;   /* #edf3fa */
-  --qs-surface:      255 255 255;   /* #ffffff */
-  --qs-surface-2:    245 250 255;   /* #f5faff */
-  --qs-surface-3:    233 241 250;   /* #e9f1fa */
-  --qs-accent:       0 138 168;     /* #008aa8 — darker for readability */
-  --qs-accent-2:     96 58 200;     /* #603ac8 */
-  --qs-accent-light: 0 138 168;
-  --qs-green:        0 152 106;     /* #00986a */
-  --qs-red:          200 38 62;     /* #c8263e */
-  --qs-text:         12 22 40;      /* #0c1628 */
-  --qs-text-dim:     96 124 156;    /* #607c9c */
+  /* ── Ivory Press palette ──────────────────────────────
+     Concept: audiophile instrument in bright daylight.
+     Warm parchment base, deep emerald accent (the daytime
+     twin of the dark theme's electric lime VU-meter green).
+     ──────────────────────────────────────────────────── */
+  --qs-bg:           245 240 232;   /* #f5f0e8 — warm parchment */
+  --qs-surface:      255 255 255;   /* pure white */
+  --qs-surface-2:    237 232 222;   /* #ede8de — warm card */
+  --qs-surface-3:    222 216 204;   /* #ded8cc — deeper warm */
+  --qs-accent:       42 107 58;     /* #2a6b3a — deep emerald */
+  --qs-accent-2:     196 80 10;     /* #c4500a — warm sienna */
+  --qs-accent-light: 107 168 120;   /* #6ba878 — mid-forest */
+  --qs-green:        26 122 74;     /* #1a7a4a — forest green */
+  --qs-red:          184 48 48;     /* #b83030 — burgundy */
+  --qs-text:         28 24 20;      /* #1c1814 — warm near-black */
+  --qs-text-dim:     140 128 112;   /* #8c8070 — warm gray */
 
   --glass-bg:        255 255 255;
   --glass-border:    0 0 0;
@@ -55,41 +59,45 @@ html.light {
     user-select: none;
     background-color: rgb(var(--qs-bg));
     color: rgb(var(--qs-text));
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
   }
 
   /* ── Scrollbar ── */
   ::-webkit-scrollbar { width: 3px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: rgb(var(--qs-accent) / 0.16);
+    background: rgb(var(--qs-accent) / 0.22);
     border-radius: 2px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--qs-accent) / 0.32);
+    background: rgb(var(--qs-accent) / 0.42);
   }
 }
 
 @layer components {
   /* ── Glass surfaces ── */
   .glass {
-    background: rgb(var(--glass-bg) / 0.92);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgb(var(--glass-border) / 0.07);
+    background: rgb(var(--glass-bg) / 0.88);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    border: 1px solid rgb(var(--glass-border) / 0.09);
+    box-shadow: 0 4px 28px rgb(0 0 0 / 0.35);
   }
 
   .glass-heavy {
-    background: rgb(var(--qs-bg) / 0.96);
-    backdrop-filter: blur(32px);
-    -webkit-backdrop-filter: blur(32px);
-    border-top: 1px solid rgb(var(--glass-border) / 0.08);
+    background: rgb(var(--qs-bg) / 0.97);
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    border-top: 1px solid rgb(var(--glass-border) / 0.07);
+    box-shadow: 0 -2px 48px rgb(0 0 0 / 0.55);
   }
 
   .glass-light {
-    background: rgb(var(--qs-surface-2) / 0.65);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border-right: 1px solid rgb(var(--glass-border) / 0.05);
+    background: rgb(var(--qs-surface-2) / 0.55);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgb(var(--glass-border) / 0.06);
   }
 
   /* ── Text gradient ── */
@@ -104,29 +112,33 @@ html.light {
 
   /* ── Quality badges ── */
   .quality-badge {
-    @apply inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest;
-    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    @apply inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-[0.12em];
+    font-family: 'Azeret Mono', 'JetBrains Mono', Consolas, monospace;
   }
 
+  /* Hi-Res (24-bit / > 44.1 kHz) — electric lime */
   .quality-hires {
     @apply quality-badge;
-    color: rgb(var(--qs-green));
-    border: 1px solid rgb(var(--qs-green) / 0.32);
-    background: rgb(var(--qs-green) / 0.07);
+    color: rgb(var(--qs-accent));
+    border: 1px solid rgb(var(--qs-accent) / 0.4);
+    background: rgb(var(--qs-accent) / 0.09);
+    text-shadow: 0 0 8px rgb(var(--qs-accent) / 0.6);
   }
 
+  /* Lossless CD-quality — teal mint */
   .quality-lossless {
     @apply quality-badge;
-    color: rgb(var(--qs-accent));
-    border: 1px solid rgb(var(--qs-accent) / 0.3);
-    background: rgb(var(--qs-accent) / 0.07);
+    color: rgb(var(--qs-green));
+    border: 1px solid rgb(var(--qs-green) / 0.35);
+    background: rgb(var(--qs-green) / 0.08);
   }
 
+  /* Local file — orange */
   .quality-local {
     @apply quality-badge;
     color: rgb(var(--qs-accent-2));
-    border: 1px solid rgb(var(--qs-accent-2) / 0.3);
-    background: rgb(var(--qs-accent-2) / 0.07);
+    border: 1px solid rgb(var(--qs-accent-2) / 0.32);
+    background: rgb(var(--qs-accent-2) / 0.08);
   }
 
   /* ── Hover lift ── */
@@ -142,25 +154,28 @@ html.light {
   isolation: isolate;
 }
 
-/* Subtle dot grid */
+/* Fine crosshatch grid — more visible than previous dot grid */
 .dynamic-bg::before {
   content: '';
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgb(var(--qs-accent) / 0.014) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--qs-accent) / 0.014) 1px, transparent 1px);
-  background-size: 56px 56px;
+    linear-gradient(rgb(var(--qs-accent) / 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--qs-accent) / 0.022) 1px, transparent 1px);
+  background-size: 40px 40px;
   pointer-events: none;
   z-index: 0;
 }
 
-/* Vignette */
+/* Vignette — draws eye inward */
 .dynamic-bg::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at 50% 110%, transparent 42%, rgb(var(--qs-bg) / 0.7) 100%);
+  background:
+    radial-gradient(ellipse at 20% 50%, rgb(var(--qs-accent) / 0.03) 0%, transparent 45%),
+    radial-gradient(ellipse at 80% 15%, rgb(var(--qs-accent-2) / 0.025) 0%, transparent 40%),
+    radial-gradient(ellipse at 50% 110%, transparent 38%, rgb(var(--qs-bg) / 0.72) 100%);
   pointer-events: none;
   z-index: 0;
 }
@@ -184,25 +199,21 @@ html.light {
 /* ── Progress bar ── */
 .progress-track {
   position: relative;
-  height: 3px;
-  border-radius: 3px;
-  background: rgb(var(--qs-text) / 0.08);
-  transition: height 0.15s ease;
+  height: 4px;
+  border-radius: 4px;
+  background: rgb(var(--qs-text) / 0.09);
+  transition: height 0.2s ease;
 }
 
 .progress-track-container:hover .progress-track {
-  height: 5px;
+  height: 6px;
 }
 
 .progress-fill {
   height: 100%;
-  border-radius: 3px;
-  background: linear-gradient(
-    90deg,
-    rgb(var(--qs-accent) / 0.7) 0%,
-    rgb(var(--qs-accent)) 100%
-  );
-  box-shadow: 0 0 8px rgb(var(--qs-accent) / 0.45);
+  border-radius: 4px;
+  background: rgb(var(--qs-accent));
+  box-shadow: 0 0 10px rgb(var(--qs-accent) / 0.65), 0 0 22px rgb(var(--qs-accent) / 0.22);
   transition: width 0.1s linear;
 }
 
@@ -218,36 +229,47 @@ html.light {
 .input-cyber:focus {
   outline: none;
   border-color: rgb(var(--qs-accent) / 0.45);
-  box-shadow: 0 0 0 1px rgb(var(--qs-accent) / 0.18);
+  box-shadow: 0 0 0 1px rgb(var(--qs-accent) / 0.2);
 }
 
 .input-cyber::placeholder { color: rgb(var(--qs-text-dim)); }
 
-/* ── Sidebar nav items ── */
+/* ── Sidebar nav items — pill style ── */
+.nav-item-active,
+.nav-item-inactive {
+  /* Single transition declaration on both states avoids re-render fighting */
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
 .nav-item-active {
-  background: rgb(var(--qs-accent) / 0.07);
-  border-left: 2px solid rgb(var(--qs-accent));
+  background-color: rgb(var(--qs-accent) / 0.1);
+  border: 1px solid rgb(var(--qs-accent) / 0.25);
   color: rgb(var(--qs-accent));
-  box-shadow: inset 0 0 14px rgb(var(--qs-accent) / 0.03);
+  box-shadow: 0 0 14px rgb(var(--qs-accent) / 0.1);
 }
 
 .nav-item-inactive {
-  border-left: 2px solid transparent;
+  border: 1px solid transparent;
   color: rgb(var(--qs-text-dim));
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  background-color: transparent;
 }
 
 .nav-item-inactive:hover {
-  background: rgb(var(--qs-accent) / 0.04);
-  border-left-color: rgb(var(--qs-accent) / 0.28);
+  background-color: rgb(var(--qs-text) / 0.04);
+  border-color: rgb(var(--qs-text) / 0.08);
   color: rgb(var(--qs-text));
+}
+
+.nav-item-active:active,
+.nav-item-inactive:active {
+  transform: scale(0.97);
 }
 
 /* ── Scan overlay (album covers) ── */
 @keyframes scan-line {
   0%   { transform: translateY(-100%); opacity: 0; }
-  8%   { opacity: 0.7; }
-  92%  { opacity: 0.7; }
+  8%   { opacity: 0.8; }
+  92%  { opacity: 0.8; }
   100% { transform: translateY(250%); opacity: 0; }
 }
 
@@ -257,11 +279,11 @@ html.light {
   content: '';
   position: absolute;
   left: 0; right: 0;
-  height: 28%;
+  height: 24%;
   background: linear-gradient(
     to bottom,
     transparent,
-    rgb(var(--qs-accent) / 0.04),
+    rgb(var(--qs-accent) / 0.05),
     transparent
   );
   animation: scan-line 6s linear infinite;
@@ -270,15 +292,15 @@ html.light {
 
 /* ── Play button ── */
 .btn-play-cyber {
-  background: rgb(var(--qs-accent) / 0.08);
-  border: 1px solid rgb(var(--qs-accent) / 0.26);
+  background: rgb(var(--qs-accent) / 0.1);
+  border: 1.5px solid rgb(var(--qs-accent) / 0.38);
   transition: background 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
 .btn-play-cyber:hover {
-  background: rgb(var(--qs-accent) / 0.16);
-  box-shadow: 0 0 18px rgb(var(--qs-accent) / 0.38), 0 0 36px rgb(var(--qs-accent) / 0.08);
-  border-color: rgb(var(--qs-accent) / 0.5);
+  background: rgb(var(--qs-accent) / 0.2);
+  box-shadow: 0 0 22px rgb(var(--qs-accent) / 0.5), 0 0 44px rgb(var(--qs-accent) / 0.14);
+  border-color: rgb(var(--qs-accent) / 0.65);
 }
 
 /* ── Card hover glow ── */
@@ -287,8 +309,8 @@ html.light {
 }
 
 .card-hover-glow:hover {
-  border-color: rgb(var(--qs-accent) / 0.22) !important;
-  box-shadow: 0 0 16px rgb(var(--qs-accent) / 0.06), 0 8px 28px rgb(0 0 0 / 0.35);
+  border-color: rgb(var(--qs-accent) / 0.25) !important;
+  box-shadow: 0 0 20px rgb(var(--qs-accent) / 0.08), 0 8px 32px rgb(0 0 0 / 0.4);
   transform: translateY(-2px);
 }
 
@@ -304,7 +326,7 @@ html.light {
 .border-gradient-cyber {
   background:
     linear-gradient(rgb(var(--qs-surface) / 0.98), rgb(var(--qs-surface) / 0.98)) padding-box,
-    linear-gradient(135deg, rgb(var(--qs-accent) / 0.42), rgb(var(--qs-accent-2) / 0.42)) border-box;
+    linear-gradient(135deg, rgb(var(--qs-accent) / 0.5), rgb(var(--qs-accent-2) / 0.45)) border-box;
   border: 1px solid transparent;
 }
 
@@ -329,14 +351,14 @@ html.light {
   height: 11px;
   border-radius: 50%;
   background: rgb(var(--qs-accent));
-  box-shadow: 0 0 6px rgb(var(--qs-accent) / 0.7);
+  box-shadow: 0 0 7px rgb(var(--qs-accent) / 0.8);
   cursor: pointer;
   transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .volume-slider::-webkit-slider-thumb:hover {
-  box-shadow: 0 0 12px rgb(var(--qs-accent) / 0.9);
-  transform: scale(1.15);
+  box-shadow: 0 0 14px rgb(var(--qs-accent) / 1);
+  transform: scale(1.2);
 }
 
 .volume-slider::-moz-range-thumb {
@@ -345,15 +367,15 @@ html.light {
   border: none;
   border-radius: 50%;
   background: rgb(var(--qs-accent));
-  box-shadow: 0 0 6px rgb(var(--qs-accent) / 0.7);
+  box-shadow: 0 0 7px rgb(var(--qs-accent) / 0.8);
   cursor: pointer;
 }
 
 /* ── EQ Panel ── */
 .eq-panel {
   background: rgb(var(--qs-bg) / 0.97);
-  backdrop-filter: blur(32px);
-  border: 1px solid rgb(var(--qs-accent) / 0.14);
+  backdrop-filter: blur(36px);
+  border: 1px solid rgb(var(--qs-accent) / 0.15);
   border-radius: 16px;
 }
 
@@ -376,14 +398,14 @@ html.light {
   height: 13px;
   border-radius: 50%;
   background: rgb(var(--qs-accent));
-  box-shadow: 0 0 7px rgb(var(--qs-accent) / 0.75);
+  box-shadow: 0 0 8px rgb(var(--qs-accent) / 0.8);
   cursor: pointer;
   transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .eq-slider::-webkit-slider-thumb:hover {
-  box-shadow: 0 0 13px rgb(var(--qs-accent) / 0.95);
-  transform: scale(1.15);
+  box-shadow: 0 0 16px rgb(var(--qs-accent) / 1);
+  transform: scale(1.2);
 }
 
 .eq-slider::-moz-range-thumb {
@@ -392,5 +414,159 @@ html.light {
   border: none;
   border-radius: 50%;
   background: rgb(var(--qs-accent));
-  box-shadow: 0 0 7px rgb(var(--qs-accent) / 0.75);
+  box-shadow: 0 0 8px rgb(var(--qs-accent) / 0.8);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   IVORY PRESS — Light mode overrides
+   Glows & neon shadows are replaced by warm, material shadows.
+   ═══════════════════════════════════════════════════════════ */
+
+/* Glass: white panels with warm amber-tinted shadows */
+html.light .glass {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+html.light .glass-heavy {
+  background: rgba(245, 240, 232, 0.97);
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+  box-shadow: 0 -2px 28px rgba(0, 0, 0, 0.08);
+}
+
+html.light .glass-light {
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+/* Progress fill: no neon glow in daylight */
+html.light .progress-fill {
+  box-shadow: 0 0 4px rgb(var(--qs-accent) / 0.4);
+}
+
+/* Quality hi-res badge: no text-shadow glow */
+html.light .quality-hires {
+  text-shadow: none;
+}
+
+/* Play button: restrained, material feel */
+html.light .btn-play-cyber {
+  background: rgb(var(--qs-accent) / 0.08);
+  border-color: rgb(var(--qs-accent) / 0.28);
+}
+html.light .btn-play-cyber:hover {
+  background: rgb(var(--qs-accent) / 0.13);
+  box-shadow: 0 0 10px rgb(var(--qs-accent) / 0.18), 0 2px 8px rgba(0, 0, 0, 0.07);
+  border-color: rgb(var(--qs-accent) / 0.48);
+}
+
+/* Card hover: warm material shadow, no neon glow */
+html.light .card-hover-glow:hover {
+  border-color: rgb(var(--qs-accent) / 0.2) !important;
+  box-shadow: 0 0 0 1px rgb(var(--qs-accent) / 0.12), 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+/* Nav active: no box-shadow glow, just tint + border */
+html.light .nav-item-active {
+  box-shadow: none;
+  background-color: rgb(var(--qs-accent) / 0.09);
+  border-color: rgb(var(--qs-accent) / 0.22);
+}
+
+/* Volume & EQ sliders: soft shadow instead of neon glow */
+html.light .volume-slider::-webkit-slider-thumb {
+  box-shadow: 0 0 3px rgb(var(--qs-accent) / 0.4), 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+html.light .volume-slider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 8px rgb(var(--qs-accent) / 0.45), 0 1px 4px rgba(0, 0, 0, 0.18);
+  transform: scale(1.15);
+}
+html.light .volume-slider::-moz-range-thumb {
+  box-shadow: 0 0 3px rgb(var(--qs-accent) / 0.4), 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+html.light .eq-slider::-webkit-slider-thumb {
+  box-shadow: 0 0 4px rgb(var(--qs-accent) / 0.4), 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+html.light .eq-slider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 10px rgb(var(--qs-accent) / 0.45), 0 1px 3px rgba(0, 0, 0, 0.2);
+  transform: scale(1.15);
+}
+html.light .eq-slider::-moz-range-thumb {
+  box-shadow: 0 0 4px rgb(var(--qs-accent) / 0.4), 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* EQ panel: warm paper surface */
+html.light .eq-panel {
+  background: rgba(245, 240, 232, 0.97);
+  border-color: rgb(var(--qs-accent) / 0.15);
+}
+
+/* Input focus: clean green ring, no harsh glow */
+html.light .input-cyber {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+html.light .input-cyber:focus {
+  border-color: rgb(var(--qs-accent) / 0.5);
+  box-shadow: 0 0 0 2px rgb(var(--qs-accent) / 0.12);
+}
+
+/* Login modal border gradient: refined in light */
+html.light .border-gradient-cyber {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.98)) padding-box,
+    linear-gradient(135deg, rgb(var(--qs-accent) / 0.45), rgb(var(--qs-accent-2) / 0.4)) border-box;
+}
+
+/* Background grid: deeper green lines on warm paper */
+html.light .dynamic-bg::before {
+  background-image:
+    linear-gradient(rgb(var(--qs-accent) / 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--qs-accent) / 0.055) 1px, transparent 1px);
+}
+
+/* Vignette: warm soft version for light */
+html.light .dynamic-bg::after {
+  background:
+    radial-gradient(ellipse at 20% 50%, rgb(var(--qs-accent) / 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 78% 15%, rgb(var(--qs-accent-2) / 0.03) 0%, transparent 45%),
+    radial-gradient(ellipse at 50% 110%, transparent 35%, rgb(var(--qs-bg) / 0.55) 100%);
+}
+
+/* Scan overlay: subtler in light */
+html.light .scan-overlay::after {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgb(var(--qs-accent) / 0.04),
+    transparent
+  );
+}
+
+/* Scrollbar: warm toned */
+html.light ::-webkit-scrollbar-thumb {
+  background: rgb(var(--qs-accent) / 0.18);
+}
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--qs-accent) / 0.32);
+}
+
+/* Sidebar right border: slightly more visible on light */
+html.light aside {
+  border-right-color: rgba(0, 0, 0, 0.09);
+}
+
+/* ── Sidebar vertical rule ── */
+.sidebar-rule {
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgb(var(--qs-text) / 0.07) 20%,
+    rgb(var(--qs-text) / 0.07) 80%,
+    transparent
+  );
+  flex-shrink: 0;
 }

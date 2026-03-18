@@ -69,24 +69,25 @@ function SpectrumCanvas() {
   const rawRef     = useRef(new Float32Array(80).fill(0)); // latest linear FFT magnitudes
   const rafRef     = useRef(0);
 
-  // ── Poll spectrum data from Rust via Tauri command (~30fps) ─────────
+  // ── Poll spectrum data — fire-and-forget, no in-flight guard ──────────
+  // get_spectrum bypasses RwLock → always fast. No fetchInFlight flag:
+  // a hung IPC Promise would permanently kill all future polls.
   useEffect(() => {
-    let active = true;
-    const poll = async () => {
-      while (active) {
-        try {
-          const data = await api.getSpectrum();
-          if (data && data.length > 0) {
+    let alive = true;
+    const timer = setInterval(() => {
+      if (!alive) return;
+      api.getSpectrum()
+        .then(data => {
+          if (!alive) return;
+          if (data?.length) {
             for (let i = 0; i < Math.min(data.length, rawRef.current.length); i++) {
               rawRef.current[i] = data[i];
             }
           }
-        } catch { /* ignore */ }
-        await new Promise((r) => setTimeout(r, 33));
-      }
-    };
-    poll();
-    return () => { active = false; };
+        })
+        .catch(() => {});
+    }, 50);
+    return () => { alive = false; clearInterval(timer); };
   }, []);
 
   // ── Resize canvas buffer to match CSS display size ──────────────────
@@ -132,11 +133,11 @@ function SpectrumCanvas() {
         const h = Math.max(2, smoothRef.current[i] * (H - 4));
         const x = i * barW;
 
-        // Colour: purple (bass) → cyan (treble)
+        // Colour: lime (bass) → orange (treble) — matches --qs-accent / --qs-accent-2
         const t = i / (N - 1);
-        const r = Math.round(139 * (1 - t));
-        const g = Math.round(92  * (1 - t) + 212 * t);
-        const b = Math.round(246 * (1 - t) + 255 * t);
+        const r = Math.round(183 + (255 - 183) * t);
+        const g = Math.round(255 + (100 - 255) * t);
+        const b = Math.round(46  + (50  - 46)  * t);
 
         const grad = ctx.createLinearGradient(0, H - h, 0, H);
         grad.addColorStop(0, `rgba(${r},${g},${b},0.85)`);
@@ -209,14 +210,14 @@ function EqDisplay({ bands, enabled }: { bands: EqBand[]; enabled: boolean }) {
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
       <defs>
         <linearGradient id="curve-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#00d4ff" stopOpacity={enabled ? 0.22 : 0.04} />
-          <stop offset="45%" stopColor="#00d4ff" stopOpacity={enabled ? 0.06 : 0.01} />
-          <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+          <stop offset="0%" stopColor="rgb(183,255,46)" stopOpacity={enabled ? 0.20 : 0.04} />
+          <stop offset="50%" stopColor="rgb(183,255,46)" stopOpacity={enabled ? 0.05 : 0.01} />
+          <stop offset="100%" stopColor="rgb(183,255,46)" stopOpacity={0} />
         </linearGradient>
         <linearGradient id="curve-stroke" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#8b5cf6" />
-          <stop offset="50%" stopColor="#00d4ff" />
-          <stop offset="100%" stopColor="#06ffa5" />
+          <stop offset="0%" stopColor="rgb(255,100,50)" />
+          <stop offset="50%" stopColor="rgb(183,255,46)" />
+          <stop offset="100%" stopColor="rgb(183,255,46)" />
         </linearGradient>
         <filter id="glow-line">
           <feGaussianBlur stdDeviation="3" result="blur" />
@@ -281,7 +282,7 @@ function EqDisplay({ bands, enabled }: { bands: EqBand[]; enabled: boolean }) {
         const x = freqToX(b.freq);
         const db = enabled ? combinedDb(b.freq, bands) : 0;
         const y = dbToY(Math.max(-MAX_DB, Math.min(MAX_DB, db)));
-        const col = b.gain > 0 ? "#00d4ff" : "#8b5cf6";
+        const col = b.gain > 0 ? "rgb(183,255,46)" : "rgb(255,100,50)";
         return (
           <g key={b.freq} clipPath="url(#chart-clip)">
             <line x1={x} y1={dbToY(0)} x2={x} y2={y}
@@ -309,12 +310,12 @@ function BandSlider({
   const absR = Math.abs(band.gain) / 12;
 
   const trackBg = isPos
-    ? `linear-gradient(to top, #00d4ff ${absR * 50}%, rgba(0,212,255,0.1) ${absR * 50}%)`
+    ? `linear-gradient(to top, rgb(183,255,46) ${absR * 50}%, rgba(183,255,46,0.1) ${absR * 50}%)`
     : isNeg
-    ? `linear-gradient(to bottom, #8b5cf6 ${absR * 50}%, rgba(139,92,246,0.1) ${absR * 50}%)`
+    ? `linear-gradient(to bottom, rgb(255,100,50) ${absR * 50}%, rgba(255,100,50,0.1) ${absR * 50}%)`
     : "rgba(255,255,255,0.06)";
 
-  const labelColor = isPos ? "#00d4ff" : isNeg ? "#a78bfa" : "rgba(255,255,255,0.3)";
+  const labelColor = isPos ? "rgb(183,255,46)" : isNeg ? "rgb(255,100,50)" : "rgba(255,255,255,0.3)";
   const sliderH = compact ? "h-24" : "h-32";
 
   return (
@@ -405,7 +406,7 @@ export default function EqView() {
                 onClick={() => setEqAdvanced(false)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
                   !eqAdvanced
-                    ? "bg-qs-accent/20 text-qs-accent shadow-[0_0_10px_rgba(0,212,255,0.15)]"
+                    ? "bg-qs-accent/20 text-qs-accent shadow-neon-sm"
                     : "text-qs-text-dim hover:text-white/70"
                 }`}
               >
@@ -415,7 +416,7 @@ export default function EqView() {
                 onClick={() => setEqAdvanced(true)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
                   eqAdvanced
-                    ? "bg-purple-500/20 text-purple-300 shadow-[0_0_10px_rgba(139,92,246,0.15)]"
+                    ? "bg-qs-accent-2/20 text-qs-accent-2 shadow-neon-orange"
                     : "text-qs-text-dim hover:text-white/70"
                 }`}
               >
@@ -438,7 +439,7 @@ export default function EqView() {
               onClick={() => setEqEnabled(!eqEnabled)}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 border ${
                 eqEnabled
-                  ? "bg-qs-accent/15 text-qs-accent border-qs-accent/35 shadow-[0_0_20px_rgba(0,212,255,0.15)]"
+                  ? "bg-qs-accent/15 text-qs-accent border-qs-accent/35 shadow-neon-sm"
                   : "bg-white/4 text-qs-text-dim border-white/10 hover:border-white/20 hover:text-white/70"
               }`}
             >
@@ -502,7 +503,7 @@ export default function EqView() {
                 disabled={!eqEnabled}
                 className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-150 border disabled:opacity-25 disabled:cursor-not-allowed ${
                   activePreset === name
-                    ? "bg-qs-accent/15 text-qs-accent border-qs-accent/35 shadow-[0_0_12px_rgba(0,212,255,0.12)]"
+                    ? "bg-qs-accent/15 text-qs-accent border-qs-accent/35 shadow-neon-sm"
                     : "bg-white/3 text-qs-text-dim border-white/8 hover:bg-white/7 hover:text-white/80 hover:border-white/15"
                 }`}
               >

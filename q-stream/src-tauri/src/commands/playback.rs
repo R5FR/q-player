@@ -258,11 +258,12 @@ pub async fn get_eq_state(
 }
 
 /// Returns the latest FFT spectrum data (80 bins, 0.0–1.0 normalized).
+/// Reads directly from the shared spectrum Arc — never blocks on the player RwLock.
 #[tauri::command]
 pub async fn get_spectrum(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<f32>, String> {
-    Ok(state.player.read().get_spectrum())
+    Ok(state.spectrum.lock().clone())
 }
 
 // ── Audio Device Commands ────────────────────────────────────────────

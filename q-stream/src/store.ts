@@ -153,6 +153,10 @@ interface AppStore {
   // Sleep timer (end timestamp in ms, null = off)
   sleepTimerEndMs: number | null;
   setSleepTimer: (minutes: number | null) => void;
+
+  // Fullscreen player
+  isFullscreen: boolean;
+  setIsFullscreen: (v: boolean) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -325,4 +329,8 @@ export const useStore = create<AppStore>((set) => ({
   setSleepTimer: (minutes) => set({
     sleepTimerEndMs: minutes ? Date.now() + minutes * 60 * 1000 : null,
   }),
+
+  // Fullscreen player
+  isFullscreen: false,
+  setIsFullscreen: (isFullscreen) => set({ isFullscreen }),
 }));

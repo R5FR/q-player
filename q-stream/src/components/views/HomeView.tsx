@@ -24,7 +24,7 @@ function SectionHeading({
     <div className="flex items-center justify-between mb-5">
       <div className="flex items-center gap-2.5">
         <Icon className={`w-4 h-4 ${iconColor} opacity-80 flex-shrink-0`} />
-        <h2 className="text-xs font-semibold text-qs-text-dim uppercase tracking-[0.12em]">
+        <h2 className="font-condensed text-xs font-semibold text-qs-text-dim uppercase tracking-[0.18em]">
           {title}
         </h2>
         {badge && badge}
@@ -207,10 +207,10 @@ export default function HomeView() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <h1 className="text-2xl font-semibold text-qs-text tracking-tight">
-          {greeting}{session.user_name ? <>, <span className="text-qs-accent">{session.user_name}</span></> : ""}
+        <h1 className="font-sans text-2xl font-semibold text-qs-text tracking-tight">
+          {greeting}{session.user_name ? <>, <span className="text-qs-accent font-medium">{session.user_name}</span></> : ""}
         </h1>
-        <p className="text-qs-text-dim text-xs mt-1 tracking-wide">
+        <p className="font-condensed text-[10px] font-medium text-qs-text-dim uppercase tracking-[0.18em] mt-1.5">
           {new Date().toLocaleDateString("fr-FR", { weekday: "long", month: "long", day: "numeric" })}
         </p>
       </motion.div>
@@ -335,7 +335,7 @@ export default function HomeView() {
         <SectionHeading
           icon={Flame}
           title="Tendances"
-          iconColor="text-orange-400"
+          iconColor="text-qs-accent-2"
           badge={
             <span className="text-[9px] text-qs-text-dim px-1.5 py-0.5 rounded bg-qs-text/5 tracking-wider uppercase ml-1">
               Last.fm
@@ -344,7 +344,7 @@ export default function HomeView() {
         />
         {trendingLoading ? (
           <div className="flex items-center gap-3 text-qs-text-dim text-sm py-4">
-            <Spinner cls="border-orange-400/50" />
+            <Spinner cls="border-qs-accent-2/50" />
             Chargement des tendances…
           </div>
         ) : trendingTracks.length > 0 ? (
@@ -376,7 +376,7 @@ export default function HomeView() {
           <SectionHeading
             icon={Star}
             title="Sélection éditoriale"
-            iconColor="text-amber-400"
+            iconColor="text-qs-accent-2"
           />
           <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {editorialPlaylists.slice(0, 12).map((pl) => (

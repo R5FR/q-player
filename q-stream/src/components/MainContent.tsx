@@ -46,7 +46,7 @@ export default function MainContent() {
   return (
     <main className="flex-1 flex flex-col overflow-hidden">
       {/* ── Barre de navigation sticky (Spotify-like) ── */}
-      <div className="flex items-center gap-3 px-4 py-2.5 flex-shrink-0 glass-heavy">
+      <div className="flex items-center gap-3 px-4 py-2.5 flex-shrink-0 glass-heavy border-b border-qs-text/[0.06]">
         {/* Flèches back / forward */}
         <div className="flex items-center gap-1">
           <button
