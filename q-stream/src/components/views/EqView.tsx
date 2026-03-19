@@ -64,25 +64,33 @@ function dbToNorm(dB: number): number {
 }
 
 function SpectrumCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const smoothRef  = useRef(new Float32Array(80).fill(0)); // smoothed normalised [0,1]
-  const rawRef     = useRef(new Float32Array(80).fill(0)); // latest linear FFT magnitudes
-  const rafRef     = useRef(0);
+  const canvasRef   = useRef<HTMLCanvasElement>(null);
+  const smoothRef   = useRef(new Float32Array(80).fill(0));
+  const rawRef      = useRef(new Float32Array(80).fill(0));
+  const rafRef      = useRef(0);
+  const lastDataRef = useRef(new Float32Array(80).fill(0));
+  const staleCount  = useRef(0);
 
-  // ── Poll spectrum data — fire-and-forget, no in-flight guard ──────────
-  // get_spectrum bypasses RwLock → always fast. No fetchInFlight flag:
-  // a hung IPC Promise would permanently kill all future polls.
   useEffect(() => {
     let alive = true;
     const timer = setInterval(() => {
       if (!alive) return;
       api.getSpectrum()
         .then(data => {
-          if (!alive) return;
-          if (data?.length) {
+          if (!alive || !data?.length) return;
+          let different = false;
+          for (let i = 0; i < Math.min(data.length, 80); i++) {
+            if (data[i] !== lastDataRef.current[i]) { different = true; break; }
+          }
+          if (different) {
+            staleCount.current = 0;
             for (let i = 0; i < Math.min(data.length, rawRef.current.length); i++) {
-              rawRef.current[i] = data[i];
+              rawRef.current[i]      = data[i];
+              lastDataRef.current[i] = data[i];
             }
+          } else {
+            staleCount.current++;
+            if (staleCount.current > 10) rawRef.current.fill(0);
           }
         })
         .catch(() => {});

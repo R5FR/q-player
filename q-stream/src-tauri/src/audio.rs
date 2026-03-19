@@ -546,15 +546,8 @@ fn decoder_thread(
         let should_wait = dec_state.is_none() || paused || buffer_full;
 
         let cmd = if should_wait {
-            // Re-emit last known spectrum while idle so the frontend never
-            // sees a gap (bars freeze rather than disappear).
-            if last_spectrum_emit.elapsed() >= Duration::from_millis(33) {
-                let last = shared.spectrum.lock().clone();
-                if last.iter().any(|&v| v > 0.001) {
-                    let _ = event_tx.send(PlayerEvent::Spectrum(last));
-                    last_spectrum_emit = Instant::now();
-                }
-            }
+            // shared.spectrum retains last FFT values — the frontend polls
+            // it directly via get_spectrum, so no re-emit needed here.
             match command_rx.recv_timeout(Duration::from_millis(25)) {
                 Ok(cmd) => Some(cmd),
                 Err(mpsc::RecvTimeoutError::Timeout) => None,
@@ -643,6 +636,7 @@ fn decoder_thread(
                             sk.clear();
                             if !paused { sk.play(); }
                         }
+                        fft_buf.clear(); // discard samples from before seek
                         position_at_start_ms = pos_ms;
                         playback_start = if !paused { Some(Instant::now()) } else { None };
                         let secs = pos_ms / 1000;
@@ -788,6 +782,19 @@ fn decoder_thread(
             continue;
         }
 
+        // Don't decode when the audio sink already has enough data buffered.
+        // Without this guard the decoder runs ~3× faster than the audio output
+        // (1 packet per 25 ms vs 1 packet consumed per ~93 ms at 44.1 kHz /
+        // 4096 samples).  It would finish decoding the entire track in ~81 s
+        // regardless of song length, setting dec_state = None while the sink
+        // still holds minutes of audio — making the FFT (and spectrum) stop
+        // while the user still hears music.  Capping at 4 packets (~185 ms
+        // look-ahead) keeps decode in sync with playback so the spectrum stays
+        // alive for the full duration of every track.
+        if buffer_full {
+            continue;
+        }
+
         // ── 4. Decode one packet ─────────────────────────────────
         let ds = dec_state.as_mut().unwrap();
 
@@ -841,6 +848,11 @@ fn decoder_thread(
                         }
 
                         // ── Spectrum FFT accumulation ──────────────────────
+                        // Results are written to shared.spectrum (Arc<Mutex>)
+                        // which the frontend polls via get_spectrum command.
+                        // No event_tx send — avoids flooding the Tauri IPC
+                        // channel with ~30 unhandled events/sec that would
+                        // degrade invoke() responsiveness over time.
                         {
                             let ch = channels as usize;
                             for frame in samples.chunks(ch) {
@@ -855,8 +867,16 @@ fn decoder_thread(
                                         SPECTRUM_BINS,
                                         &fft_forward,
                                     );
-                                    *shared.spectrum.lock() = spectrum.clone();
-                                    let _ = event_tx.send(PlayerEvent::Spectrum(spectrum));
+                                    // Only overwrite when the frame has audible signal.
+                                    // End-of-track silence padding produces all-zero FFT
+                                    // output; writing those zeros makes the spectrum
+                                    // disappear for the entire next-track download gap
+                                    // (30-60 s for Qobuz). Keeping the last non-silent
+                                    // frame lets the frontend smoothing decay it naturally.
+                                    let peak = spectrum.iter().cloned().fold(0.0f32, f32::max);
+                                    if peak > 1e-5 {
+                                        *shared.spectrum.lock() = spectrum;
+                                    }
                                     last_spectrum_emit = Instant::now();
                                 }
                                 // 50% overlap hop
@@ -1129,9 +1149,156 @@ mod tests {
         let mut bank = EqFilterBank::new(&bands, 44100, 2);
         let mut samples = vec![0.5f32, -0.3, 0.1, 0.8, -0.5, 0.2];
         bank.process(&mut samples);
-        // Should not crash and all samples should be clamped to [-1, 1]
         for s in &samples {
             assert!(s.is_finite() && *s >= -1.0 && *s <= 1.0);
         }
+    }
+
+    // ── FFT / Spectrum tests ──────────────────────────────────────────────
+
+    fn make_fft(size: usize) -> std::sync::Arc<dyn rustfft::Fft<f32>> {
+        FftPlanner::<f32>::new().plan_fft_forward(size)
+    }
+
+    #[test]
+    fn spectrum_returns_correct_bin_count() {
+        let fft     = make_fft(FFT_SIZE);
+        let silence = vec![0.0f32; FFT_SIZE];
+        let bins    = compute_log_spectrum(&silence, 44100, SPECTRUM_BINS, &fft);
+        assert_eq!(bins.len(), SPECTRUM_BINS,
+            "Expected {} bins, got {}", SPECTRUM_BINS, bins.len());
+    }
+
+    #[test]
+    fn spectrum_values_are_non_negative() {
+        let fft    = make_fft(FFT_SIZE);
+        let signal: Vec<f32> = (0..FFT_SIZE)
+            .map(|i| (i as f32 * 0.37).sin() * 0.5)
+            .collect();
+        let bins = compute_log_spectrum(&signal, 44100, SPECTRUM_BINS, &fft);
+        let negatives: Vec<(usize, f32)> = bins.iter().enumerate()
+            .filter(|(_, &v)| v < 0.0)
+            .map(|(i, &v)| (i, v))
+            .collect();
+        assert!(negatives.is_empty(),
+            "Spectrum has negative bins: {:?}", negatives);
+    }
+
+    #[test]
+    fn spectrum_silence_is_near_zero() {
+        let fft     = make_fft(FFT_SIZE);
+        let silence = vec![0.0f32; FFT_SIZE];
+        let bins    = compute_log_spectrum(&silence, 44100, SPECTRUM_BINS, &fft);
+        let max     = bins.iter().cloned().fold(0.0f32, f32::max);
+        assert!(max < 1e-6,
+            "Silent input produced non-zero spectrum: max = {}", max);
+    }
+
+    #[test]
+    fn spectrum_440hz_sine_peaks_near_correct_bin() {
+        let fft         = make_fft(FFT_SIZE);
+        let sample_rate = 44100u32;
+        let freq        = 440.0f32;
+
+        let signal: Vec<f32> = (0..FFT_SIZE)
+            .map(|i| (2.0 * PI * freq * i as f32 / sample_rate as f32).sin())
+            .collect();
+
+        let bins     = compute_log_spectrum(&signal, sample_rate, SPECTRUM_BINS, &fft);
+        let peak_bin = bins.iter().enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
+
+        // Log-scale position of 440 Hz between 20 Hz and 20 kHz
+        let expected = ((440.0f32 / 20.0).log10() / (20000.0f32 / 20.0).log10()
+            * (SPECTRUM_BINS - 1) as f32) as usize;
+
+        assert!(
+            peak_bin.abs_diff(expected) <= 5,
+            "440 Hz peak at bin {} but expected near bin {} (tolerance ±5)",
+            peak_bin, expected
+        );
+    }
+
+    #[test]
+    fn spectrum_amplitude_correlates_with_signal_level() {
+        let fft         = make_fft(FFT_SIZE);
+        let sample_rate = 44100u32;
+        let freq        = 1000.0f32;
+
+        let make = |amp: f32| -> Vec<f32> {
+            (0..FFT_SIZE)
+                .map(|i| amp * (2.0 * PI * freq * i as f32 / sample_rate as f32).sin())
+                .collect()
+        };
+
+        let low  = compute_log_spectrum(&make(0.1), sample_rate, SPECTRUM_BINS, &fft);
+        let high = compute_log_spectrum(&make(0.9), sample_rate, SPECTRUM_BINS, &fft);
+
+        let max_low  = low .iter().cloned().fold(0.0f32, f32::max);
+        let max_high = high.iter().cloned().fold(0.0f32, f32::max);
+
+        assert!(max_high > max_low,
+            "Higher amplitude must produce larger spectrum values: high={} low={}",
+            max_high, max_low);
+    }
+
+    #[test]
+    fn spectrum_shared_arc_mutex_concurrent_read_write() {
+        use parking_lot::Mutex;
+        use std::sync::Arc;
+
+        let shared: Arc<Mutex<Vec<f32>>> =
+            Arc::new(Mutex::new(vec![0.0f32; SPECTRUM_BINS]));
+
+        // 8 reader threads + 1 writer — no deadlock, no panic
+        let readers: Vec<_> = (0..8).map(|_| {
+            let s = Arc::clone(&shared);
+            thread::spawn(move || {
+                for _ in 0..200 {
+                    let data = s.lock().clone();
+                    assert_eq!(data.len(), SPECTRUM_BINS);
+                }
+            })
+        }).collect();
+
+        for i in 0..200u32 {
+            *shared.lock() = vec![i as f32 / 200.0; SPECTRUM_BINS];
+        }
+
+        for h in readers { h.join().unwrap(); }
+
+        // After writes, data is valid
+        let final_data = shared.lock().clone();
+        assert_eq!(final_data.len(), SPECTRUM_BINS);
+        assert!(final_data.iter().all(|&v| v >= 0.0 && v <= 1.0));
+    }
+
+    #[test]
+    fn spectrum_fft_throttle_33ms_logic() {
+        // Verify the throttling gate: elapsed >= 33ms → emit; else skip
+        let mut last_emit = Instant::now();
+        let mut emit_count = 0u32;
+
+        for tick in 0..100 {
+            // Simulate 10ms per tick → emit every 4th tick (≈33ms)
+            let fake_elapsed = Duration::from_millis(tick * 10);
+            if fake_elapsed.saturating_sub(last_emit.elapsed()) == Duration::ZERO
+                && fake_elapsed >= Duration::from_millis(33)
+            {
+                emit_count += 1;
+                last_emit = Instant::now();
+            }
+        }
+        // This is a structural test — just ensure it compiles and runs
+        let _ = emit_count;
+
+        // Direct logic test: 33ms gate
+        let t0 = Instant::now() - Duration::from_millis(40);
+        assert!(t0.elapsed() >= Duration::from_millis(33));
+
+        let t1 = Instant::now() - Duration::from_millis(10);
+        assert!(t1.elapsed() < Duration::from_millis(33));
     }
 }

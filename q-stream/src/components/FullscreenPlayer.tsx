@@ -24,13 +24,8 @@ interface Props {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Spectrum visualizer
-//
-// Architecture : single useEffect that owns ResizeObserver + RAF loop.
-// API calls are fire-and-forget inside the RAF tick (no await in the loop),
-// so a slow/hung getSpectrum() call never blocks the draw loop and the
-// smooth-decay never drains to zero while waiting for data.
-// Colors: lime accent (#B7FF2E = 183 255 46) to match the app theme.
+// SpectrumViz — copie exacte de SpectrumCanvas (EqView) qui fonctionne.
+// Seule différence : couleur lime pure au lieu du dégradé lime→orange.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DB_FLOOR = -70;
@@ -38,95 +33,146 @@ const DB_REF   =  0;
 function linToDB(v: number) { return 20 * Math.log10(Math.max(v, 1e-9)); }
 function dbToNorm(dB: number) { return Math.max(0, Math.min(1, (dB - DB_FLOOR) / (DB_REF - DB_FLOOR))); }
 
-const SpectrumViz = React.memo(function SpectrumViz() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const smoothRef = useRef(new Float32Array(80).fill(0));
-  const rawRef    = useRef(new Float32Array(80).fill(0));
-  const rafRef    = useRef(0);
+// Shared diagnostic stats — written by SpectrumViz, read by SpectrumDiag
+const diagStats = {
+  polls: 0, successes: 0, errors: 0, rafFrames: 0, lastSuccessMs: 0, maxRaw: 0,
+};
 
+const N_BINS = 80;
+
+function SpectrumViz() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const smoothRef    = useRef(new Float32Array(N_BINS).fill(0));
+  const rawRef       = useRef(new Float32Array(N_BINS).fill(0));
+  const rafRef       = useRef(0);
+  const lastDataRef  = useRef(new Float32Array(N_BINS).fill(0));
+  const staleCount   = useRef(0);
+
+  // ── Poll spectrum data ──────────────────────────────────────────────
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d")!;
-    const N = 80;
     let alive = true;
-
-    // ── Resize handler ──────────────────────────────────────────────────
-    const resize = () => {
-      canvas.width  = canvas.clientWidth  * devicePixelRatio;
-      canvas.height = canvas.clientHeight * devicePixelRatio;
-    };
-    const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
-    resize();
-
-    // ── Poll spectrum — fire-and-forget, no in-flight guard ─────────────
-    // get_spectrum reads directly from Arc<Mutex<Vec<f32>>> in AppState,
-    // bypassing the player RwLock → always non-blocking, always fast.
-    // No fetchInFlight flag: if a single IPC Promise never resolves (rare
-    // WebView2 edge case), a guard flag would permanently kill all future
-    // polls. Without it, overlapping calls are harmless.
-    const pollTimer = setInterval(() => {
+    const timer = setInterval(() => {
       if (!alive) return;
+      diagStats.polls++;
       api.getSpectrum()
-        .then(d => {
-          if (!alive) return;
-          if (d?.length) for (let i = 0; i < N && i < d.length; i++) rawRef.current[i] = d[i];
+        .then(data => {
+          if (!alive || !data?.length) return;
+          let different = false;
+          for (let i = 0; i < Math.min(data.length, N_BINS); i++) {
+            if (data[i] !== lastDataRef.current[i]) { different = true; break; }
+          }
+          if (different) {
+            staleCount.current = 0;
+            for (let i = 0; i < Math.min(data.length, rawRef.current.length); i++) {
+              rawRef.current[i]      = data[i];
+              lastDataRef.current[i] = data[i];
+            }
+            diagStats.successes++;
+            diagStats.lastSuccessMs = Date.now();
+            diagStats.maxRaw = Math.max(...data);
+          } else {
+            staleCount.current++;
+            if (staleCount.current > 10) rawRef.current.fill(0);
+          }
         })
-        .catch(() => {});
+        .catch(() => { diagStats.errors++; });
     }, 50);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
 
-    // ── RAF draw loop — purely rendering, no async ───────────────────────
+  // ── Draw loop — updates bar heights via direct DOM style writes ─────
+  // Uses div elements instead of <canvas> to avoid WebView2/Chromium
+  // compositing-layer caching that freezes canvas content inside
+  // framer-motion animated containers.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const bars = container.children;
+
     const draw = () => {
-      if (!alive) return;
       rafRef.current = requestAnimationFrame(draw);
-
-      const W = canvas.width  || canvas.clientWidth;
-      const H = canvas.height || canvas.clientHeight;
-      if (!W || !H) return;
-      ctx.clearRect(0, 0, W, H);
-
-      const bw = W / N;
-      for (let i = 0; i < N; i++) {
+      diagStats.rafFrames++;
+      for (let i = 0; i < N_BINS; i++) {
         const target = Math.pow(dbToNorm(linToDB(rawRef.current[i])), 0.75);
         const delta  = target - smoothRef.current[i];
         smoothRef.current[i] += delta * (delta > 0 ? 0.55 : 0.07);
-
-        const h = Math.max(2, smoothRef.current[i] * (H - 4));
-        const x = i * bw, y = H - h;
-
-        const grad = ctx.createLinearGradient(0, y, 0, H);
-        grad.addColorStop(0,    "rgba(183,255,46,0.55)");
-        grad.addColorStop(0.55, "rgba(183,255,46,0.18)");
-        grad.addColorStop(1,    "rgba(183,255,46,0.01)");
-        ctx.fillStyle = grad;
-
-        const bx = x + 0.5, bwn = Math.max(1, bw - 1), rx = Math.min(2, bwn / 2);
-        ctx.beginPath();
-        ctx.moveTo(bx + rx, y);
-        ctx.lineTo(bx + bwn - rx, y);
-        ctx.quadraticCurveTo(bx + bwn, y, bx + bwn, y + rx);
-        ctx.lineTo(bx + bwn, y + h);
-        ctx.lineTo(bx, y + h);
-        ctx.lineTo(bx, y + rx);
-        ctx.quadraticCurveTo(bx, y, bx + rx, y);
-        ctx.closePath();
-        ctx.fill();
+        const bar = bars[i] as HTMLDivElement | undefined;
+        if (bar) {
+          bar.style.height = `${Math.max(0.3, smoothRef.current[i] * 100)}%`;
+        }
       }
     };
-
     draw();
-
-    return () => {
-      alive = false;
-      cancelAnimationFrame(rafRef.current);
-      clearInterval(pollTimer);
-      ro.disconnect();
-    };
+    return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  return <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />;
-});
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        display: "flex", alignItems: "flex-end",
+        width: "100%", height: "100%", gap: "1px",
+      }}
+    >
+      {Array.from({ length: N_BINS }, (_, i) => (
+        <div
+          key={i}
+          style={{
+            flex: 1,
+            height: "0.3%",
+            borderRadius: "2px 2px 0 0",
+            background:
+              "linear-gradient(to bottom, rgba(183,255,46,0.27), rgba(183,255,46,0.025))",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Diagnostic overlay — press Ctrl+Shift+D in fullscreen to toggle
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SpectrumDiag() {
+  const [snap, setSnap] = useState({ ...diagStats, age: 0 });
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      const age = diagStats.lastSuccessMs > 0
+        ? Math.round((Date.now() - diagStats.lastSuccessMs) / 100) / 10
+        : -1;
+      setSnap({ ...diagStats, age });
+    }, 500);
+    return () => clearInterval(t);
+  }, []);
+
+  const successRate = snap.polls > 0
+    ? Math.round((snap.successes / snap.polls) * 100)
+    : 0;
+
+  const isStale = snap.age > 2;
+
+  return (
+    <div style={{
+      position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)",
+      zIndex: 99999, background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)",
+      border: "1px solid rgba(183,255,46,0.3)", borderRadius: 8, padding: "8px 14px",
+      fontFamily: "monospace", fontSize: 11, color: "#b7ff2e", lineHeight: 1.7,
+      pointerEvents: "none", minWidth: 260,
+    }}>
+      <div style={{ color: "rgba(183,255,46,0.5)", marginBottom: 2 }}>◆ SPECTRUM DIAG (Ctrl+Shift+D)</div>
+      <div>polls:    <b>{snap.polls}</b> ({snap.polls > 0 ? Math.round(snap.polls / 50) : 0}s uptime)</div>
+      <div>success:  <b style={{ color: successRate === 100 ? "#b7ff2e" : "#ff6432" }}>{snap.successes}</b> ({successRate}%)</div>
+      <div>errors:   <b style={{ color: snap.errors > 0 ? "#ff6432" : "#b7ff2e" }}>{snap.errors}</b></div>
+      <div>RAF:      <b>{snap.rafFrames}</b> frames</div>
+      <div>last ok:  <b style={{ color: isStale ? "#ff6432" : "#b7ff2e" }}>
+        {snap.age < 0 ? "never" : `${snap.age}s ago`}
+      </b> {isStale ? "⚠ STALE" : "✓"}</div>
+      <div>max raw:  <b>{snap.maxRaw.toFixed(4)}</b> {snap.maxRaw < 0.0001 ? "⚠ ZERO" : "✓"}</div>
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main component
@@ -156,6 +202,7 @@ export default function FullscreenPlayer({ onClose }: Props) {
   const [localVolume,  setLocalVolume]    = useState(playback.volume);
   const [prevVolume,   setPrevVolume]     = useState(0.7);
   const [showQueue,    setShowQueue]      = useState(false);
+  const [showDiag,     setShowDiag]      = useState(false);
   const [queueData,    setQueueData]      = useState<QueueState>(queue);
 
   const seekVal  = useRef<number>(0);
@@ -174,7 +221,10 @@ export default function FullscreenPlayer({ onClose }: Props) {
   useEffect(() => { setLocalVolume(playback.volume); }, [playback.volume]);
 
   useEffect(() => {
-    const fn = (e: KeyboardEvent) => { if (e.key === "Escape") setIsFullscreen(false); };
+    const fn = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+      if (e.key === "D" && e.ctrlKey && e.shiftKey) setShowDiag(v => !v);
+    };
     document.addEventListener("keydown", fn);
     return () => document.removeEventListener("keydown", fn);
   }, []);
@@ -227,6 +277,9 @@ export default function FullscreenPlayer({ onClose }: Props) {
       className="fixed inset-0 z-[9999] overflow-hidden"
       style={{ background: "#03030a" }}
     >
+      {/* ──────── DIAGNOSTIC OVERLAY (Ctrl+Shift+D) ──────── */}
+      {showDiag && <SpectrumDiag />}
+
       {/* ──────── LAYER 1 : immersive blurred backdrop ──────── */}
       <AnimatePresence>
         {track?.cover_url && (
