@@ -5,6 +5,7 @@ use regex::Regex;
 use reqwest::Client;
 use thiserror::Error;
 use tracing::{debug, info, warn};
+use serde_json::Value as JsonValue;
 
 const QOBUZ_BASE_URL: &str = "https://www.qobuz.com/api.json/0.2";
 const QOBUZ_PLAY_URL: &str = "https://play.qobuz.com/login";
@@ -432,6 +433,10 @@ impl QobuzClient {
         self.api_get("album/get", &[("album_id", album_id)]).await
     }
 
+    pub async fn get_track(&self, track_id: i64) -> Result<QobuzTrack, QobuzError> {
+        self.api_get("track/get", &[("track_id", &track_id.to_string())]).await
+    }
+
     pub async fn get_artist(&self, artist_id: i64) -> Result<QobuzArtist, QobuzError> {
         self.api_get(
             "artist/get",
@@ -612,5 +617,53 @@ impl QobuzClient {
 
     pub fn app_id(&self) -> &str {
         &self.app_id
+    }
+
+    /// Fetch a short-lived JWT for proactive Qobuz Connect WebSocket connection.
+    /// Returns `(ws_endpoint, ws_jwt)`.
+    pub async fn get_connect_jwt(&self) -> Result<(String, String), QobuzError> {
+        let url = format!("{}/qws/createToken", QOBUZ_BASE_URL);
+        let resp = self
+            .client
+            .post(&url)
+            .header("X-App-Id", &self.app_id)
+            .header("X-User-Auth-Token", &self.user_auth_token)
+            .form(&[
+                ("jwt", "jwt_qws"),
+                ("user_auth_token_needed", "true"),
+                ("strong_auth_needed", "true"),
+            ])
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Err(QobuzError::Api(format!(
+                "createToken failed: {}",
+                resp.status()
+            )));
+        }
+
+        let data: JsonValue = resp
+            .json()
+            .await
+            .map_err(|e| QobuzError::Parse(format!("createToken parse error: {e}")))?;
+
+        let jwt_payload = data
+            .get("jwt_qws")
+            .ok_or_else(|| QobuzError::Parse("missing jwt_qws".into()))?;
+
+        let endpoint = jwt_payload
+            .get("endpoint")
+            .and_then(|v| v.as_str())
+            .unwrap_or("wss://play.qobuz.com/ws")
+            .to_string();
+
+        let jwt = jwt_payload
+            .get("jwt")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| QobuzError::Parse("missing jwt".into()))?
+            .to_string();
+
+        Ok((endpoint, jwt))
     }
 }

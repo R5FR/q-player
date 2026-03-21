@@ -288,6 +288,39 @@ export async function setAudioDevice(deviceName: string | null): Promise<void> {
   return invoke("set_audio_device", { deviceName });
 }
 
+// ── Qobuz Connect ──
+
+export async function scanConnectDevices(): Promise<void> {
+  return invoke("scan_connect_devices");
+}
+
+export async function startQobuzConnect(): Promise<void> {
+  return invoke("start_qobuz_connect");
+}
+
+export async function stopQobuzConnect(): Promise<void> {
+  return invoke("stop_qobuz_connect");
+}
+
+export async function getConnectStatus(): Promise<boolean> {
+  return invoke("get_connect_status");
+}
+
+export interface ConnectRenderer {
+  renderer_id: number;
+  name: string;
+  model: string;
+  is_active: boolean;
+}
+
+export async function getConnectRenderers(): Promise<ConnectRenderer[]> {
+  return invoke("get_connect_renderers");
+}
+
+export async function castToRenderer(rendererId: number): Promise<void> {
+  return invoke("cast_to_renderer", { rendererId });
+}
+
 // ── Persistence ──
 
 /** Load recently played, dismissed albums and search history from disk. */

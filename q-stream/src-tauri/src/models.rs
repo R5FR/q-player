@@ -496,6 +496,17 @@ pub struct SearchHistoryEntry {
     pub entry_type: String,
 }
 
+// ── Qobuz Connect ──
+
+/// A Qobuz Connect renderer visible on the network (reported by the server).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectRenderer {
+    pub renderer_id: u64,
+    pub name: String,
+    pub model: String,
+    pub is_active: bool,
+}
+
 /// All data persisted across sessions.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PersistentAppData {

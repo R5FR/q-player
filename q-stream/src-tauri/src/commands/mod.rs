@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod browse;
+pub mod connect;
 pub mod favorites;
 pub mod lastfm;
 pub mod local_library;

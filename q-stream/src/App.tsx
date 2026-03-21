@@ -60,6 +60,13 @@ export default function App() {
     return () => clearTimeout(t);
   }, [sleepTimerEndMs]);
 
+  // Auto-start Qobuz Connect as soon as the session is available
+  useEffect(() => {
+    if (!session.logged_in) return;
+    api.startQobuzConnect().catch(() => {});
+    api.scanConnectDevices().catch(() => {});
+  }, [session.logged_in]);
+
   // Poll playback state + scrobbling + smart queue refill
   useEffect(() => {
     if (!session.logged_in) return;

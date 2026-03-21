@@ -35,6 +35,8 @@ color-thief = "0.2"
 walkdir = "2"
 rustfft = "6"
 urlencoding = "2"
+qonductor = { path = "../../../qonductor-main" }
+mdns-sd = "0.17"
 
 [profile.dev]
 # Reduce debug info to line tables only (instead of full DWARF).

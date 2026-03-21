@@ -14,6 +14,7 @@ import {
   Moon,
   Monitor,
   Maximize2,
+  Cast,
 } from "lucide-react";
 import { useStore } from "../store";
 import * as api from "../api";
@@ -37,9 +38,12 @@ export default function PlayerBar() {
   const [prevVolume, setPrevVolume] = useState(0.7);
   const [showDeviceMenu, setShowDeviceMenu] = useState(false);
   const [showSleepMenu, setShowSleepMenu] = useState(false);
+  const [showConnectMenu, setShowConnectMenu] = useState(false);
+  const [connectRenderers, setConnectRenderers] = useState<api.ConnectRenderer[]>([]);
 
   const deviceMenuRef = useRef<HTMLDivElement>(null);
   const sleepMenuRef = useRef<HTMLDivElement>(null);
+  const connectMenuRef = useRef<HTMLDivElement>(null);
 
   const track = playback.current_track;
 
@@ -49,6 +53,7 @@ export default function PlayerBar() {
 
   useEffect(() => {
     api.getAudioDevices().then(setAudioDevices).catch(() => {});
+    api.scanConnectDevices().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -57,6 +62,8 @@ export default function PlayerBar() {
         setShowDeviceMenu(false);
       if (sleepMenuRef.current && !sleepMenuRef.current.contains(e.target as Node))
         setShowSleepMenu(false);
+      if (connectMenuRef.current && !connectMenuRef.current.contains(e.target as Node))
+        setShowConnectMenu(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -166,6 +173,17 @@ export default function PlayerBar() {
     setSleepTimer(minutes);
     setShowSleepMenu(false);
   };
+
+  // Refresh renderer list whenever the menu opens
+  useEffect(() => {
+    if (!showConnectMenu) return;
+    // Re-scan on every open so fresh devices appear quickly
+    api.scanConnectDevices().catch(() => {});
+    const refresh = () => api.getConnectRenderers().then(setConnectRenderers).catch(() => {});
+    refresh();
+    const id = setInterval(refresh, 2000);
+    return () => clearInterval(id);
+  }, [showConnectMenu]);
 
   const formatTime = (ms: number) => {
     const s = Math.floor(ms / 1000);
@@ -432,6 +450,98 @@ export default function PlayerBar() {
                   <span className="truncate">{dev}</span>
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Qobuz Connect */}
+          <div className="relative flex-shrink-0" ref={connectMenuRef}>
+            <button
+              onClick={() => {
+                const opening = !showConnectMenu;
+                setShowConnectMenu(opening);
+                if (opening) api.scanConnectDevices().catch(() => {});
+              }}
+              title="Qobuz Connect"
+              className="relative text-qs-accent transition-colors"
+            >
+              <Cast className="w-4 h-4" />
+              <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-qs-accent animate-pulse shadow-neon-sm" />
+            </button>
+            <div
+              className={`absolute bottom-full right-0 mb-3 w-60 glass rounded-xl overflow-hidden z-50
+                transition-all duration-150 origin-bottom-right
+                ${showConnectMenu ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
+            >
+              <div className="px-3 py-2 border-b border-qs-text/[0.07] flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-qs-accent animate-pulse flex-shrink-0" />
+                <p className="font-condensed text-[9px] font-semibold text-qs-accent uppercase tracking-[0.18em]">
+                  Qobuz Connect — Actif
+                </p>
+              </div>
+
+              {/* This device */}
+              <div className="px-3 py-2.5 flex items-center gap-2.5 text-qs-accent bg-qs-accent/5">
+                <span className="relative flex-shrink-0">
+                  <Cast className="w-3.5 h-3.5" />
+                  <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-qs-accent animate-pulse" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-sans text-xs truncate">Q-Stream</p>
+                  <p className="font-condensed text-[9px] text-qs-text-dim/50 uppercase tracking-wider">
+                    Cet appareil · Visible dans Qobuz
+                  </p>
+                </div>
+              </div>
+
+              {/* Other devices on the network */}
+              {connectRenderers.length > 0 && (
+                <>
+                  <div className="mx-3 my-0.5 h-px bg-qs-text/[0.05]" />
+                  {connectRenderers.map((r) => (
+                    <button
+                      key={r.renderer_id}
+                      onClick={() => {
+                        api.castToRenderer(r.renderer_id).catch(console.error);
+                        setShowConnectMenu(false);
+                      }}
+                      className={`w-full px-3 py-2.5 font-sans text-xs flex items-center gap-2.5 text-left transition-colors
+                        ${r.is_active
+                          ? "text-qs-accent bg-qs-accent/5"
+                          : "text-qs-text-dim hover:text-qs-text hover:bg-qs-accent/5"
+                        }`}
+                    >
+                      <Cast className={`w-3.5 h-3.5 flex-shrink-0 ${r.is_active ? "" : "opacity-50"}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="truncate">{r.name}</p>
+                        {r.model && r.model !== "Qobuz Connect" && (
+                          <p className="font-condensed text-[9px] text-qs-text-dim/50 uppercase tracking-wider truncate">
+                            {r.model}
+                          </p>
+                        )}
+                      </div>
+                      {r.is_active && (
+                        <span className="font-condensed text-[9px] uppercase tracking-wider text-qs-accent flex-shrink-0">
+                          Actif
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {connectRenderers.length === 0 && (
+                <div className="px-3 py-3 text-center">
+                  <p className="font-sans text-[10px] text-qs-text-dim/50">
+                    Recherche d'appareils…
+                  </p>
+                </div>
+              )}
+
+              <div className="px-3 py-2 border-t border-qs-text/[0.05]">
+                <p className="font-sans text-[10px] text-qs-text-dim/60 leading-snug">
+                  Contrôlez la lecture depuis l'app Qobuz sur mobile
+                </p>
+              </div>
             </div>
           </div>
 

@@ -138,6 +138,13 @@ fn main() {
             commands::lastfm::lastfm_disconnect,
             commands::lastfm::lastfm_now_playing,
             commands::lastfm::lastfm_scrobble,
+            // Qobuz Connect
+            commands::connect::scan_connect_devices,
+            commands::connect::start_qobuz_connect,
+            commands::connect::stop_qobuz_connect,
+            commands::connect::get_connect_status,
+            commands::connect::get_connect_renderers,
+            commands::connect::cast_to_renderer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Q-Stream");
