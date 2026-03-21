@@ -1,0 +1,13 @@
+# Build environment for ASIO support.
+# VS 2022 is installed on D:\Programmes instead of the default C:\Program Files,
+# so asio-sys needs VCINSTALLDIR to find vcvarsall.bat.
+[env]
+VCINSTALLDIR = "D:\\Programmes\\VisualStudio\\VC\\"
+# Path to libclang.dll — required by bindgen to generate ASIO bindings.
+# LLVM 22 installed at C:\Program Files\LLVM via: winget install LLVM.LLVM
+LIBCLANG_PATH = "C:\\Program Files\\LLVM\\bin"
+# Tell clang (used by bindgen) where MSVC and Windows SDK headers are.
+# Without this, bindgen fails on windows.h → excpt.h (MSVC runtime header not in the Windows SDK).
+# Tell clang where MSVC runtime headers are (excpt.h, etc.).
+# Windows SDK paths are already resolved by asio-sys via vcvarsall.bat.
+BINDGEN_EXTRA_CLANG_ARGS = "-ID:/Programmes/VisualStudio/VC/Tools/MSVC/14.43.34808/include"

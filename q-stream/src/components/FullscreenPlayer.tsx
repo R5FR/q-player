@@ -42,6 +42,7 @@ const N_BINS = 80;
 
 function SpectrumViz() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const glowRef      = useRef<HTMLDivElement>(null);
   const smoothRef    = useRef(new Float32Array(N_BINS).fill(0));
   const rawRef       = useRef(new Float32Array(N_BINS).fill(0));
   const rafRef       = useRef(0);
@@ -87,19 +88,32 @@ function SpectrumViz() {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const bars = container.children;
+    const wrappers = container.children;
+    const glow     = glowRef.current;
 
     const draw = () => {
       rafRef.current = requestAnimationFrame(draw);
       diagStats.rafFrames++;
+      let energy = 0;
+
       for (let i = 0; i < N_BINS; i++) {
         const target = Math.pow(dbToNorm(linToDB(rawRef.current[i])), 0.75);
         const delta  = target - smoothRef.current[i];
         smoothRef.current[i] += delta * (delta > 0 ? 0.55 : 0.07);
-        const bar = bars[i] as HTMLDivElement | undefined;
-        if (bar) {
-          bar.style.height = `${Math.max(0.3, smoothRef.current[i] * 100)}%`;
-        }
+        const h = smoothRef.current[i];
+        energy += h;
+
+        const wrapper = wrappers[i] as HTMLDivElement | undefined;
+        if (!wrapper) continue;
+        const bar = wrapper.children[0] as HTMLDivElement;
+
+        bar.style.height  = `${Math.max(0, h * 100)}%`;
+        bar.style.opacity = (0.22 + h * 0.78).toFixed(2);
+      }
+
+      // Ambient floor glow breathes with average spectral energy
+      if (glow) {
+        glow.style.opacity = Math.min(0.9, (energy / N_BINS) * 3.2).toFixed(2);
       }
     };
     draw();
@@ -107,25 +121,44 @@ function SpectrumViz() {
   }, []);
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        display: "flex", alignItems: "flex-end",
-        width: "100%", height: "100%", gap: "1px",
-      }}
-    >
-      {Array.from({ length: N_BINS }, (_, i) => (
-        <div
-          key={i}
-          style={{
-            flex: 1,
-            height: "0.3%",
-            borderRadius: "2px 2px 0 0",
-            background:
-              "linear-gradient(to bottom, rgba(183,255,46,0.27), rgba(183,255,46,0.025))",
-          }}
-        />
-      ))}
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      {/* Ambient radial bloom at the base — pulses with music energy */}
+      <div
+        ref={glowRef}
+        style={{
+          position: "absolute",
+          bottom: 0, left: 0, right: 0,
+          height: "45%",
+          opacity: 0,
+          pointerEvents: "none",
+          background: "radial-gradient(ellipse 90% 100% at 50% 100%, rgb(var(--qs-accent) / 0.2) 0%, transparent 70%)",
+        }}
+      />
+      {/* Bars + peak markers */}
+      <div
+        ref={containerRef}
+        style={{ display: "flex", alignItems: "flex-end", width: "100%", height: "100%", gap: "2px" }}
+      >
+        {Array.from({ length: N_BINS }, (_, i) => (
+          <div
+            key={i}
+            style={{ flex: 1, height: "100%", position: "relative", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}
+          >
+            <div style={{
+              height: 0,
+              minHeight: "2px",
+              borderRadius: "3px 3px 0 0",
+              opacity: 0.2,
+              background:
+                "linear-gradient(to bottom," +
+                "  rgb(var(--qs-accent)) 0%," +
+                "  rgb(var(--qs-accent) / 0.65) 30%," +
+                "  rgb(var(--qs-accent) / 0.28) 65%," +
+                "  rgb(var(--qs-accent) / 0.05) 100%)",
+            }} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -318,7 +351,7 @@ export default function FullscreenPlayer({ onClose }: Props) {
       }} />
 
       {/* ──────── LAYER 3 : spectrum — fills bottom third ──────── */}
-      <div className="absolute bottom-0 left-0 right-0 pointer-events-none" style={{ height: "38%", opacity: 0.32, filter: "blur(0.5px)" }}>
+      <div className="absolute bottom-0 left-0 right-0 pointer-events-none" style={{ height: "38%", opacity: 0.44, filter: "blur(1px)" }}>
         <SpectrumViz />
       </div>
 

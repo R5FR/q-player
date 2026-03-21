@@ -452,10 +452,12 @@ impl AudioPlayer {
         let _ = self.command_tx.send(AudioCommand::SetDevice(name));
     }
 
-    /// Enumerate available audio output devices on the current host.
+    /// Enumerate available audio output devices (WASAPI + ASIO if feature enabled).
     pub fn get_audio_devices() -> Vec<String> {
-        let host = cpal::default_host();
         let mut devices = vec!["Default".to_string()];
+
+        // WASAPI / CoreAudio / ALSA — default host
+        let host = cpal::default_host();
         if let Ok(devs) = host.output_devices() {
             for dev in devs {
                 if let Ok(name) = dev.name() {
@@ -463,6 +465,17 @@ impl AudioPlayer {
                 }
             }
         }
+
+        // ASIO devices — read driver names from the Windows registry without loading
+        // any driver DLL. Loading drivers via cpal::host_from_id causes heap corruption
+        // with some ASIO drivers (e.g. CAUSBAudio) during enumeration.
+        // The actual driver is only loaded when the user selects an ASIO device for playback.
+        #[cfg(feature = "asio")]
+        for name in asio_drivers_from_registry() {
+            tracing::info!("[audio_devices] ASIO (registry): {name}");
+            devices.push(format!("ASIO: {name}"));
+        }
+
         devices
     }
 
@@ -508,6 +521,8 @@ struct DecoderState {
     decoder: Box<dyn symphonia::core::codecs::Decoder>,
     track_id: u32,
     sample_buf: Option<SampleBuffer<f32>>,
+    /// Sample rate read from codec params; used to configure the ASIO stream.
+    sample_rate: Option<u32>,
 }
 
 fn decoder_thread(
@@ -523,6 +538,9 @@ fn decoder_thread(
 
     let mut dec_state: Option<DecoderState> = None;
     let mut paused = false;
+    // Sample rate at which the ASIO stream is currently open (0 = not yet opened).
+    // When a new track has a different SR, the stream is torn down and rebuilt.
+    let mut current_stream_sr: u32 = 0;
 
     let mut playback_start: Option<Instant> = None;
     let mut position_at_start_ms: u64 = 0;
@@ -571,15 +589,26 @@ fn decoder_thread(
             match cmd {
                 AudioCommand::LoadBytes { bytes, seek_to_ms } => {
                     if let Some(sk) = &sink { sk.clear(); }
-                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device);
                     position_at_start_ms = 0;
                     playback_start = Some(Instant::now());
-                    // Use ArcCursor to avoid cloning the entire audio buffer on every seek
+                    // Decode first to know the track's sample rate before opening the stream.
                     let arc_cursor = ArcCursor { data: bytes.clone(), pos: 0 };
                     dec_state = create_decoder(Box::new(arc_cursor), None, &shared);
                     cached_bytes = Some(bytes.clone());
                     cached_file = None;
-                    eq_filter_bank = None; // rebuild on next packet
+                    eq_filter_bank = None;
+                    // For ASIO: reopen the stream at the track's sample rate if it changed.
+                    let new_sr = dec_state.as_ref().and_then(|d| d.sample_rate);
+                    let is_asio = preferred_device.as_ref().map(|n| n.starts_with("ASIO:")).unwrap_or(false);
+                    if is_asio {
+                        if let Some(sr) = new_sr {
+                            if sr != current_stream_sr {
+                                sink = None; _handle = None; _stream = None;
+                                current_stream_sr = sr;
+                            }
+                        }
+                    }
+                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device, new_sr.filter(|_| is_asio));
                     paused = false;
                     if let Some(sk) = &sink { sk.play(); }
                     if let Some(ms) = seek_to_ms {
@@ -600,7 +629,6 @@ fn decoder_thread(
 
                 AudioCommand::LoadFile { path, seek_to_ms } => {
                     if let Some(sk) = &sink { sk.clear(); }
-                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device);
                     position_at_start_ms = 0;
                     playback_start = Some(Instant::now());
                     match File::open(&path) {
@@ -609,6 +637,17 @@ fn decoder_thread(
                             cached_file = Some(path.clone());
                             cached_bytes = None;
                             eq_filter_bank = None;
+                            let new_sr = dec_state.as_ref().and_then(|d| d.sample_rate);
+                            let is_asio = preferred_device.as_ref().map(|n| n.starts_with("ASIO:")).unwrap_or(false);
+                            if is_asio {
+                                if let Some(sr) = new_sr {
+                                    if sr != current_stream_sr {
+                                        sink = None; _handle = None; _stream = None;
+                                        current_stream_sr = sr;
+                                    }
+                                }
+                            }
+                            ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device, new_sr.filter(|_| is_asio));
                             paused = false;
                             if let Some(sk) = &sink { sk.play(); }
                             if let Some(ms) = seek_to_ms {
@@ -739,8 +778,9 @@ fn decoder_thread(
                     _handle = None;
                     _stream = None;
                     preferred_device = name;
-                    // Recreate sink with new device
-                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device);
+                    current_stream_sr = 0; // force SR negotiation on next LoadBytes/LoadFile
+                    // Open the new device at its default SR (will be corrected on next play).
+                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device, None);
                     // Playback stops; user must press play again
                     dec_state = None;
                     playback_start = None;
@@ -965,32 +1005,184 @@ fn compute_log_spectrum(
 
 // ── Helper functions ─────────────────────────────────────────────────
 
+/// Enumerate installed ASIO driver names from the Windows registry.
+///
+/// Reads `HKLM\SOFTWARE\ASIO` subkey names without loading any driver DLL.
+/// Loading drivers via `cpal::host_from_id` causes heap corruption with some
+/// buggy ASIO drivers (notably CAUSBAudio) during device enumeration.
+#[cfg(feature = "asio")]
+fn asio_drivers_from_registry() -> Vec<String> {
+    use std::process::Command;
+    let output = match Command::new("reg")
+        .args(["query", r"HKLM\SOFTWARE\ASIO"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::warn!("[audio_devices] reg query failed: {e}");
+            return vec![];
+        }
+    };
+    let prefix = r"HKEY_LOCAL_MACHINE\SOFTWARE\ASIO\";
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.starts_with(prefix) && line.len() > prefix.len() {
+                Some(line[prefix.len()..].to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Find the best ASIO output config for a target sample rate.
+///
+/// Priority:
+/// 1. Stereo (2 ch) exact SR match
+/// 2. Any-channel exact SR match
+/// 3. Stereo closest SR (prefer higher — upsampling > downsampling)
+/// 4. Any-channel closest SR
+///
+/// Many ASIO drivers skip 176400 Hz (e.g. CAUSBAudio) but support 192000 Hz;
+/// this function selects 192000 Hz automatically in that case.
+#[cfg(feature = "asio")]
+fn best_asio_config(
+    ranges: &[cpal::SupportedStreamConfigRange],
+    target: cpal::SampleRate,
+) -> Option<(cpal::SupportedStreamConfigRange, cpal::SampleRate)> {
+    let stereo: Vec<_> = ranges.iter().filter(|r| r.channels() == 2).collect();
+    let any: Vec<_> = ranges.iter().collect();
+
+    // 1 & 2 — exact SR match
+    for group in [&stereo, &any] {
+        if let Some(r) = group
+            .iter()
+            .find(|r| r.min_sample_rate() <= target && target <= r.max_sample_rate())
+        {
+            return Some(((*r).clone(), target));
+        }
+    }
+
+    // 3 & 4 — closest supported SR (prefer higher rates)
+    for group in [&stereo, &any] {
+        let best = group.iter().min_by_key(|r| {
+            let sr = r.min_sample_rate().0 as i64;
+            let diff = sr - target.0 as i64;
+            // Penalise lower rates slightly so we prefer rounding up
+            if diff < 0 { (-diff) * 2 } else { diff }
+        });
+        if let Some(r) = best {
+            return Some(((*r).clone(), r.min_sample_rate()));
+        }
+    }
+    None
+}
+
+/// Open an OutputStream for the requested device name.
+///
+/// Device name routing:
+///   - `None`           → system default (WASAPI on Windows)
+///   - `"ASIO: <name>"` → ASIO host (requires `--features asio` + ASIO SDK)
+///   - `"<name>"`       → WASAPI / CoreAudio device by name
+///
+/// Falls back to the system default on any lookup failure.
+fn open_output_stream_impl(
+    device_name: &Option<String>,
+    sample_rate: Option<u32>,
+) -> Result<(OutputStream, OutputStreamHandle), rodio::StreamError> {
+    let Some(name) = device_name else {
+        return OutputStream::try_default();
+    };
+
+    // ── ASIO path (compile-time optional) ──────────────────────────────
+    #[cfg(feature = "asio")]
+    if let Some(asio_name) = name.strip_prefix("ASIO: ") {
+        match cpal::host_from_id(cpal::HostId::Asio) {
+            Ok(asio_host) => {
+                let device = asio_host
+                    .output_devices()
+                    .ok()
+                    .and_then(|mut devs| {
+                        devs.find(|d| d.name().ok().as_deref() == Some(asio_name))
+                    });
+                return match device {
+                    Some(dev) => {
+                        // Try to open the stream at the track's exact sample rate
+                        // for bit-perfect output — ASIO does not resample.
+                        if let Some(sr) = sample_rate {
+                            let target = cpal::SampleRate(sr);
+                            let all_ranges: Vec<_> = dev
+                                .supported_output_configs()
+                                .ok()
+                                .map(|it| it.collect())
+                                .unwrap_or_default();
+
+                            if let Some((range, actual_sr)) =
+                                best_asio_config(&all_ranges, target)
+                            {
+                                let cfg = range.with_sample_rate(actual_sr);
+                                if actual_sr != target {
+                                    info!(
+                                        "ASIO: {sr} Hz not supported, using {} Hz instead",
+                                        actual_sr.0
+                                    );
+                                }
+                                info!("ASIO opening: {} ch @ {} Hz", cfg.channels(), actual_sr.0);
+                                match OutputStream::try_from_device_config(&dev, cfg) {
+                                    Ok(result) => return Ok(result),
+                                    Err(e) => {
+                                        warn!("ASIO {} Hz failed ({e}), falling back to device default", actual_sr.0);
+                                    }
+                                }
+                            } else {
+                                warn!("ASIO device reports no supported configs");
+                            }
+                        }
+                        OutputStream::try_from_device(&dev)
+                    }
+                    None => {
+                        warn!("ASIO device '{asio_name}' not found, using system default");
+                        OutputStream::try_default()
+                    }
+                };
+            }
+            Err(e) => {
+                warn!("ASIO host unavailable ({e}), using system default");
+                return OutputStream::try_default();
+            }
+        }
+    }
+
+    // ── WASAPI / CoreAudio path ─────────────────────────────────────────
+    let host = cpal::default_host();
+    let device = host
+        .output_devices()
+        .ok()
+        .and_then(|mut devs| devs.find(|d| d.name().ok().as_deref() == Some(name.as_str())));
+    match device {
+        Some(dev) => OutputStream::try_from_device(&dev),
+        None => {
+            warn!("Output device '{name}' not found, using system default");
+            OutputStream::try_default()
+        }
+    }
+}
+
 fn ensure_sink(
     stream: &mut Option<OutputStream>,
     handle: &mut Option<OutputStreamHandle>,
     sink: &mut Option<Sink>,
     volume: f32,
     device_name: &Option<String>,
+    sample_rate: Option<u32>,
 ) {
     if sink.is_some() {
         return;
     }
 
-    let result = if let Some(name) = device_name {
-        let host = cpal::default_host();
-        let device = host
-            .output_devices()
-            .ok()
-            .and_then(|mut devs| devs.find(|d| d.name().ok().as_deref() == Some(name.as_str())));
-        match device {
-            Some(dev) => OutputStream::try_from_device(&dev),
-            None => OutputStream::try_default(),
-        }
-    } else {
-        OutputStream::try_default()
-    };
-
-    match result {
+    match open_output_stream_impl(device_name, sample_rate) {
         Ok((s, h)) => match Sink::try_new(&h) {
             Ok(sk) => {
                 sk.set_volume(AudioPlayer::cubic_volume(volume));
@@ -1056,7 +1248,8 @@ fn create_decoder(
     };
 
     shared.is_finished.store(false, Ordering::SeqCst);
-    Some(DecoderState { format: probed.format, decoder, track_id, sample_buf: None })
+    let sample_rate = track.codec_params.sample_rate;
+    Some(DecoderState { format: probed.format, decoder, track_id, sample_buf: None, sample_rate })
 }
 
 // ── Unit Tests ───────────────────────────────────────────────────────

@@ -48,3 +48,8 @@ debug = false
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+# Enable ASIO audio output (Windows only).
+# Requires the Steinberg ASIO SDK: https://www.steinberg.net/asiosdk
+# Set CPAL_ASIO_DIR=<path/to/ASIOSDK2.3.3> before building, then:
+#   cargo build --features asio
+asio = ["cpal/asio"]
