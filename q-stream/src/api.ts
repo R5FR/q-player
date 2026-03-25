@@ -321,6 +321,14 @@ export async function castToRenderer(rendererId: number): Promise<void> {
   return invoke("cast_to_renderer", { rendererId });
 }
 
+/** Control the active remote renderer (play/pause/seek/next/prev) after casting. */
+export async function controlRendererPlayback(
+  action: "play" | "pause" | "seek" | "next" | "prev",
+  positionMs?: number,
+): Promise<void> {
+  return invoke("control_renderer_playback", { action, positionMs: positionMs ?? null });
+}
+
 // ── Persistence ──
 
 /** Load recently played, dismissed albums and search history from disk. */

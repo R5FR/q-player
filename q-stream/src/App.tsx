@@ -60,12 +60,20 @@ export default function App() {
     return () => clearTimeout(t);
   }, [sleepTimerEndMs]);
 
-  // Auto-start Qobuz Connect as soon as the session is available
+  // Auto-start Qobuz Connect as soon as the session is available; stop on logout or unmount
   useEffect(() => {
     if (!session.logged_in) return;
     api.startQobuzConnect().catch(() => {});
     api.scanConnectDevices().catch(() => {});
+    return () => { api.stopQobuzConnect().catch(() => {}); };
   }, [session.logged_in]);
+
+  // Stop Connect cleanly when the app window closes
+  useEffect(() => {
+    const onClose = () => { api.stopQobuzConnect().catch(() => {}); };
+    window.addEventListener("beforeunload", onClose);
+    return () => window.removeEventListener("beforeunload", onClose);
+  }, []);
 
   // Poll playback state + scrobbling + smart queue refill
   useEffect(() => {

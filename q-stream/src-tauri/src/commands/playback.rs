@@ -1,6 +1,6 @@
 use crate::audio::EqBandParam;
 use crate::models::*;
-use crate::state::AppState;
+use crate::state::{AppState, ConnectCtrlCmd};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
@@ -10,80 +10,51 @@ pub async fn play_track(
     track_id: i64,
     state: State<'_, Arc<AppState>>,
 ) -> Result<PlaybackState, String> {
-    // Get the Qobuz client
     let qobuz = {
         let guard = state.qobuz.read();
         guard.clone().ok_or("Not logged in")?
     };
 
-    // Get streaming URL (tries highest quality first)
-    let track_url = qobuz
-        .get_track_url(track_id)
-        .await
-        .map_err(|e| format!("Failed to get track URL: {}", e))?;
+    // Fetch URL and metadata concurrently
+    let (track_url_res, track_info_res) = tokio::join!(
+        qobuz.get_track_url(track_id),
+        qobuz.get_track(track_id),
+    );
+    let track_url = track_url_res.map_err(|e| format!("Failed to get track URL: {e}"))?;
+    let track_info = track_info_res.map_err(|e| format!("Failed to get track info: {e}"))?;
 
-    // Fetch track bytes (from cache or network)
+    // Fetch bytes (from cache or network)
     let bytes = qobuz
         .fetch_track_bytes(&track_url)
         .await
-        .map_err(|e| format!("Failed to fetch track: {}", e))?;
-
-    // Get track metadata
-    let track_info: QobuzTrack = {
-        let qobuz_client = {
-            let guard = state.qobuz.read();
-            guard.clone().ok_or("Not logged in")?
-        };
-        qobuz_client
-            .search(&track_id.to_string(), 1)
-            .await
-            .map_err(|e| format!("Failed to get track info: {}", e))?
-            .tracks
-            .and_then(|t| t.items.into_iter().find(|t| t.id == track_id))
-            .ok_or_else(|| "Track not found".to_string())?
-    };
+        .map_err(|e| format!("Failed to fetch track: {e}"))?;
 
     let unified = UnifiedTrack {
         id: track_id.to_string(),
         title: track_info.title,
-        artist: track_info
-            .performer
-            .as_ref()
-            .map(|p| p.name.clone())
-            .unwrap_or_else(|| "Unknown".to_string()),
-        album: track_info
-            .album
-            .as_ref()
-            .map(|a| a.title.clone())
-            .unwrap_or_else(|| "Unknown".to_string()),
+        artist: track_info.performer.as_ref().map(|p| p.name.clone()).unwrap_or_else(|| "Unknown".into()),
+        album: track_info.album.as_ref().map(|a| a.title.clone()).unwrap_or_else(|| "Unknown".into()),
         duration_seconds: track_info.duration,
-        cover_url: track_info
-            .album
-            .as_ref()
-            .and_then(|a| a.image.as_ref())
-            .and_then(|i| i.large.clone()),
+        cover_url: track_info.album.as_ref().and_then(|a| a.image.as_ref()).and_then(|i| i.large.clone()),
         source: TrackSource::Qobuz { track_id },
-        quality_label: Some(format!(
-            "{}-bit/{}kHz FLAC",
-            track_url.bit_depth, track_url.sampling_rate
-        )),
+        quality_label: Some(format!("{}-bit/{}kHz FLAC", track_url.bit_depth, track_url.sampling_rate)),
         sample_rate: Some(track_url.sampling_rate),
         bit_depth: Some(track_url.bit_depth),
     };
 
-    // Play through audio engine
     {
         let mut player = state.player.write();
-        player.play_bytes(
-            bytes,
-            unified,
-            Some(track_url.sampling_rate),
-            Some(track_url.bit_depth),
-        )?;
+        player.play_bytes(bytes, unified, Some(track_url.sampling_rate), Some(track_url.bit_depth))?;
     }
 
-    let player = state.player.read();
-    Ok(player.playback_state())
+    {
+        let ctrl = state.connect_ctrl_tx.lock().await;
+        if let Some(tx) = ctrl.as_ref() {
+            let _ = tx.try_send(ConnectCtrlCmd::LocalTrackStarted(track_id as u32));
+        }
+    }
+
+    Ok(state.player.read().playback_state())
 }
 
 #[tauri::command]
@@ -119,8 +90,29 @@ pub async fn set_volume(volume: f32, state: State<'_, Arc<AppState>>) -> Result<
 pub async fn get_playback_state(
     state: State<'_, Arc<AppState>>,
 ) -> Result<PlaybackState, String> {
-    let player = state.player.read();
-    Ok(player.playback_state())
+    let mut pb = state.player.read().playback_state();
+
+    // If a remote renderer is active (Q-Stream has cast), overlay its state.
+    if let Some(remote) = state.connect_remote_state.read().as_ref() {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let elapsed = now_ms.saturating_sub(remote.last_updated_at_ms);
+        let interp_pos = if remote.is_playing {
+            (remote.position_ms + elapsed).min(remote.duration_ms)
+        } else {
+            remote.position_ms
+        };
+        pb.is_playing = remote.is_playing;
+        pb.position_ms = interp_pos;
+        pb.duration_ms = remote.duration_ms;
+        if remote.track.is_some() {
+            pb.current_track = remote.track.clone();
+        }
+    }
+
+    Ok(pb)
 }
 
 #[tauri::command]
@@ -139,40 +131,7 @@ pub async fn next_track(state: State<'_, Arc<AppState>>) -> Result<Option<Playba
     };
 
     if let Some(track) = next_track {
-        match &track.source {
-            TrackSource::Qobuz { track_id } => {
-                let qobuz = {
-                    let guard = state.qobuz.read();
-                    guard.clone().ok_or("Not logged in")?
-                };
-
-                let track_url = qobuz
-                    .get_track_url(*track_id)
-                    .await
-                    .map_err(|e| e.to_string())?;
-
-                let bytes = qobuz
-                    .fetch_track_bytes(&track_url)
-                    .await
-                    .map_err(|e| e.to_string())?;
-
-                let mut player = state.player.write();
-                player.play_bytes(
-                    bytes,
-                    track,
-                    Some(track_url.sampling_rate),
-                    Some(track_url.bit_depth),
-                )?;
-
-                Ok(Some(player.playback_state()))
-            }
-            TrackSource::Local { file_path } => {
-                let path = PathBuf::from(file_path);
-                let mut player = state.player.write();
-                player.play_file(&path, track, None, None)?;
-                Ok(Some(player.playback_state()))
-            }
-        }
+        Ok(Some(play_qobuz_track(state, track).await?))
     } else {
         Ok(None)
     }
@@ -196,42 +155,44 @@ pub async fn previous_track(
     };
 
     if let Some(track) = prev_track {
-        match &track.source {
-            TrackSource::Qobuz { track_id } => {
-                let qobuz = {
-                    let guard = state.qobuz.read();
-                    guard.clone().ok_or("Not logged in")?
-                };
-
-                let track_url = qobuz
-                    .get_track_url(*track_id)
-                    .await
-                    .map_err(|e| e.to_string())?;
-
-                let bytes = qobuz
-                    .fetch_track_bytes(&track_url)
-                    .await
-                    .map_err(|e| e.to_string())?;
-
-                let mut player = state.player.write();
-                player.play_bytes(
-                    bytes,
-                    track,
-                    Some(track_url.sampling_rate),
-                    Some(track_url.bit_depth),
-                )?;
-
-                Ok(Some(player.playback_state()))
-            }
-            TrackSource::Local { file_path } => {
-                let path = PathBuf::from(file_path);
-                let mut player = state.player.write();
-                player.play_file(&path, track, None, None)?;
-                Ok(Some(player.playback_state()))
-            }
-        }
+        Ok(Some(play_qobuz_track(state, track).await?))
     } else {
         Ok(None)
+    }
+}
+
+/// Internal helper: fetch + play a Qobuz track from a `UnifiedTrack` already in the queue.
+/// Metadata is already known; only the stream URL and bytes are fetched.
+async fn play_qobuz_track(
+    state: State<'_, Arc<AppState>>,
+    track: UnifiedTrack,
+) -> Result<PlaybackState, String> {
+    match &track.source {
+        TrackSource::Qobuz { track_id } => {
+            let tid = *track_id;
+            let qobuz = {
+                let guard = state.qobuz.read();
+                guard.clone().ok_or("Not logged in")?
+            };
+            let track_url = qobuz.get_track_url(tid).await.map_err(|e| e.to_string())?;
+            let bytes = qobuz.fetch_track_bytes(&track_url).await.map_err(|e| e.to_string())?;
+            let pb = {
+                let mut player = state.player.write();
+                player.play_bytes(bytes, track, Some(track_url.sampling_rate), Some(track_url.bit_depth))?;
+                player.playback_state()
+            };
+            let ctrl = state.connect_ctrl_tx.lock().await;
+            if let Some(tx) = ctrl.as_ref() {
+                let _ = tx.try_send(ConnectCtrlCmd::LocalTrackStarted(tid as u32));
+            }
+            Ok(pb)
+        }
+        TrackSource::Local { file_path } => {
+            let path = PathBuf::from(file_path);
+            let mut player = state.player.write();
+            player.play_file(&path, track, None, None)?;
+            Ok(player.playback_state())
+        }
     }
 }
 

@@ -10,8 +10,8 @@ use qonductor::{
 use tauri::State;
 use tracing::{error, info, warn};
 
-use crate::models::{ConnectRenderer, TrackSource, UnifiedTrack};
-use crate::state::AppState;
+use crate::models::{ConnectRemoteState, ConnectRenderer, TrackSource, UnifiedTrack};
+use crate::state::{AppState, ConnectCtrlCmd};
 
 fn hash_str(s: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -134,6 +134,8 @@ struct ConnectState {
     duration_ms: u32,
     /// Pending play: (queue_item_id, seek_ms) when SetState arrived before QueueLoadTracks.
     pending_play: Option<(u64, Option<u32>)>,
+    /// track_id the remote renderer is currently playing (tracked via RestoreState).
+    last_remote_track_id: Option<u32>,
 }
 
 impl ConnectState {
@@ -146,6 +148,7 @@ impl ConnectState {
             position_ms: 0,
             duration_ms: 0,
             pending_play: None,
+            last_remote_track_id: None,
         }
     }
 
@@ -232,7 +235,36 @@ pub async fn get_connect_status(state: State<'_, Arc<AppState>>) -> Result<bool,
 pub async fn get_connect_renderers(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<ConnectRenderer>, String> {
-    Ok(state.connect_renderers.read().clone())
+    let own_id = *state.connect_own_renderer_id.read();
+    let list = state.connect_renderers.read();
+    Ok(list
+        .iter()
+        .filter(|r| own_id.map_or(true, |id| r.renderer_id != id))
+        .cloned()
+        .collect())
+}
+
+/// Control the active Qobuz Connect renderer (play / pause / seek / next / prev).
+/// Only meaningful after Q-Stream has cast to another renderer.
+#[tauri::command]
+pub async fn control_renderer_playback(
+    state: State<'_, Arc<AppState>>,
+    action: String,
+    position_ms: Option<u32>,
+) -> Result<(), String> {
+    let cmd = match action.as_str() {
+        "play"  => ConnectCtrlCmd::Play,
+        "pause" => ConnectCtrlCmd::Pause,
+        "seek"  => ConnectCtrlCmd::Seek(position_ms.unwrap_or(0)),
+        "next"  => ConnectCtrlCmd::Next,
+        "prev"  => ConnectCtrlCmd::Prev,
+        other   => return Err(format!("Unknown action: {other}")),
+    };
+    let guard = state.connect_ctrl_tx.lock().await;
+    match &*guard {
+        Some(tx) => tx.send(cmd).await.map_err(|e| format!("Ctrl channel closed: {e}")),
+        None => Err("Qobuz Connect is not running".to_string()),
+    }
 }
 
 /// Transfer playback to an external Qobuz Connect renderer.
@@ -304,6 +336,13 @@ async fn run_connect_loop(
         *guard = Some(cast_tx);
     }
 
+    // Set up controller-command channel for controlling the active renderer after cast
+    let (ctrl_tx, mut ctrl_rx) = tokio::sync::mpsc::channel::<ConnectCtrlCmd>(8);
+    {
+        let mut guard = state.connect_ctrl_tx.lock().await;
+        *guard = Some(ctrl_tx);
+    }
+
     let mut connect = ConnectState::new();
 
     loop {
@@ -322,10 +361,30 @@ async fn run_connect_loop(
                 }
             }
             Some(renderer_id) = cast_rx.recv() => {
+                info!(
+                    "Qobuz Connect: casting to renderer {renderer_id} \
+                     (current: track_id={:?} queue_item_id={:?} pos={}ms playing={:?})",
+                    connect.current_track_id,
+                    connect.current_queue_item_id,
+                    connect.position_ms,
+                    connect.playing,
+                );
                 if let Err(e) = session.cast_to(renderer_id).await {
                     warn!("Cast to renderer {renderer_id} failed: {e}");
                 } else {
-                    info!("Qobuz Connect: casting to renderer {renderer_id}");
+                    info!("Qobuz Connect: cast command sent — staying connected as inactive renderer");
+                }
+            }
+            Some(cmd) = ctrl_rx.recv() => {
+                if let ConnectCtrlCmd::LocalTrackStarted(track_id) = cmd {
+                    info!("Connect: local track started (track_id={track_id}), pushing to server queue");
+                    connect.current_track_id = Some(track_id);
+                    connect.current_queue_item_id = None; // will be updated by QueueLoadTracks
+                    if let Err(e) = session.push_queue(vec![track_id]).await {
+                        warn!("Connect: push_queue failed: {e}");
+                    }
+                } else {
+                    handle_ctrl_cmd(&session, &mut connect, cmd).await;
                 }
             }
         }
@@ -336,6 +395,11 @@ async fn run_connect_loop(
         let mut cast = state.connect_cast_tx.lock().await;
         *cast = None;
     }
+    {
+        let mut ctrl = state.connect_ctrl_tx.lock().await;
+        *ctrl = None;
+    }
+    *state.connect_remote_state.write() = None;
     let mut stop = state.connect_stop.lock().await;
     *stop = None;
 
@@ -350,6 +414,8 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
             // Device activated by Qobuz app: report current state
             Command::SetActive { respond, .. } => {
                 info!(">>> CMD SetActive (device activated by Qobuz app)");
+                // Clear remote state: Q-Stream is now the active renderer again
+                *state.connect_remote_state.write() = None;
                 let pb = state.player.read().playback_state();
                 respond.send(ActivationState {
                     muted: false,
@@ -385,14 +451,17 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
                     cmd.next_queue_item.as_ref().and_then(|q| q.queue_item_id),
                 );
 
-                // queue_item_id links to the server's queue — needed for mobile track title
-                let queue_item_id_raw = cmd.current_queue_item.as_ref().and_then(|q| q.queue_item_id);
+                // Filter Qobuz sentinel values (u32::MAX / u64::MAX = "no track")
+                let queue_item_id_raw = cmd.current_queue_item.as_ref()
+                    .and_then(|q| q.queue_item_id)
+                    .filter(|&id| id != u64::MAX);
                 let queue_item_id = queue_item_id_raw.map(|id| id as i32);
 
                 // track_id may be absent (direct tap from phone album view sends only queue_item_id).
                 // Fall back to looking up in our cached queue by queue_item_id.
                 let requested_track_id = cmd.current_queue_item.as_ref()
                     .and_then(|q| q.track_id)
+                    .filter(|&id| id != u32::MAX)
                     .or_else(|| {
                         queue_item_id_raw.and_then(|qid| {
                             connect.queue.iter()
@@ -528,25 +597,44 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
                 }
                 connect.queue = q.tracks;
 
-                // Protocol convention: the user-selected track is ALWAYS at index 0
-                // (queue_item_id=None). If it differs from what's currently playing,
-                // the user clicked a new track from browse — start playing it immediately.
-                // (No SetState is sent for browse-click; QueueLoadTracks IS the play command.)
-                let selected_track_id = connect.queue.first().and_then(|t| t.track_id);
-                if let Some(track_id) = selected_track_id {
-                    if Some(track_id) != connect.current_track_id {
-                        info!("Connect: QueueLoadTracks → new track selected: {track_id}, starting playback");
-                        connect.current_track_id = Some(track_id);
-                        connect.current_queue_item_id = None;
-                        connect.playing = PlayingState::Playing;
-                        connect.pending_play = None;
-                        let state_clone = state.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = fetch_and_play(state_clone, track_id as i64, None).await {
-                                error!("Connect: QueueLoadTracks fetch_and_play failed: {e}");
-                            }
-                        });
-                        return; // skip pending_play resolution — new play supersedes it
+                // If the server just assigned queue_item_ids for our locally-playing track
+                // (response to LocalTrackStarted → push_queue), capture the id so heartbeats
+                // report the correct track to the mobile app.
+                if let Some(first) = connect.queue.first() {
+                    if first.track_id == connect.current_track_id
+                        && first.queue_item_id.is_some()
+                        && first.queue_item_id.map(|id| id as i32) != connect.current_queue_item_id
+                    {
+                        let new_qid = first.queue_item_id.map(|id| id as i32);
+                        info!("Connect: server assigned queue_item_id={new_qid:?} for local track");
+                        connect.current_queue_item_id = new_qid;
+                        return;
+                    }
+                }
+
+                // Protocol convention: when the mobile browses and clicks a track, it appears
+                // at index 0 with queue_item_id=None (not yet server-assigned).
+                // If the first track has a queue_item_id, this is a server-state sync (e.g.
+                // initial connect or session restore) — do NOT auto-play.
+                let first = connect.queue.first();
+                let is_fresh_selection = first.map_or(false, |t| t.queue_item_id.is_none());
+                let selected_track_id = first.and_then(|t| t.track_id);
+                if is_fresh_selection {
+                    if let Some(track_id) = selected_track_id {
+                        if Some(track_id) != connect.current_track_id {
+                            info!("Connect: QueueLoadTracks → new track selected: {track_id}, starting playback");
+                            connect.current_track_id = Some(track_id);
+                            connect.current_queue_item_id = None;
+                            connect.playing = PlayingState::Playing;
+                            connect.pending_play = None;
+                            let state_clone = state.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = fetch_and_play(state_clone, track_id as i64, None).await {
+                                    error!("Connect: QueueLoadTracks fetch_and_play failed: {e}");
+                                }
+                            });
+                            return; // skip pending_play resolution — new play supersedes it
+                        }
                     }
                 }
 
@@ -645,7 +733,11 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
             }
 
             Notification::Deactivated => {
-                info!(">>> NOTIF Deactivated (another renderer became active)");
+                info!(
+                    ">>> NOTIF Deactivated — pausing (track_id={:?} pos={}ms) — session stays open for cast-back",
+                    connect.current_track_id,
+                    connect.position_ms,
+                );
                 state.player.write().pause();
                 connect.playing = PlayingState::Paused;
             }
@@ -658,6 +750,83 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
 
             Notification::DeviceRegistered { renderer_id, .. } => {
                 info!(">>> NOTIF DeviceRegistered renderer_id={renderer_id}");
+                *state.connect_own_renderer_id.write() = Some(renderer_id);
+            }
+
+            // State updates from the active renderer while we're inactive (after cast).
+            // Updates remote playback state visible to the frontend, and tracks
+            // which queue_item_id the remote renderer is on for next/prev navigation.
+            Notification::RestoreState(rsu) => {
+                if let Some(state_msg) = &rsu.state {
+                    let is_playing = state_msg.playing_state
+                        .and_then(|s| PlayingState::try_from(s).ok())
+                        .map_or(false, |s| s == PlayingState::Playing);
+                    let position_ms = state_msg.current_position
+                        .as_ref()
+                        .and_then(|p| p.value)
+                        .unwrap_or(0) as u64;
+                    let duration_ms = state_msg.duration.unwrap_or(0) as u64;
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+
+                    // Update or create remote state entry
+                    {
+                        let mut remote = state.connect_remote_state.write();
+                        match remote.as_mut() {
+                            Some(r) => {
+                                r.is_playing = is_playing;
+                                r.position_ms = position_ms;
+                                r.duration_ms = duration_ms;
+                                r.last_updated_at_ms = now_ms;
+                            }
+                            None => {
+                                *remote = Some(ConnectRemoteState {
+                                    is_playing,
+                                    position_ms,
+                                    duration_ms,
+                                    last_updated_at_ms: now_ms,
+                                    track: None,
+                                });
+                            }
+                        }
+                    }
+
+                    // Track navigation (queue_item_id for next/prev) + metadata fetch
+                    if let Some(idx) = state_msg.current_queue_index {
+                        let track_ref = connect.queue.get(idx as usize);
+                        let new_queue_item_id = track_ref
+                            .and_then(|t| t.queue_item_id)
+                            .map(|id| id as i32);
+                        let new_track_id = track_ref.and_then(|t| t.track_id);
+
+                        if new_queue_item_id != connect.current_queue_item_id {
+                            info!(
+                                "Connect: remote renderer moved to queue index {} → queue_item_id={:?}",
+                                idx, new_queue_item_id
+                            );
+                            connect.current_queue_item_id = new_queue_item_id;
+                        }
+
+                        // Fetch track metadata when track changes
+                        if new_track_id != connect.last_remote_track_id {
+                            connect.last_remote_track_id = new_track_id;
+                            if let Some(tid) = new_track_id {
+                                info!("Connect: remote track changed to track_id={tid}, fetching metadata");
+                                let state_clone = state.clone();
+                                tokio::spawn(async move {
+                                    if let Some(unified) = fetch_track_as_unified(&state_clone, tid as i64).await {
+                                        let mut remote = state_clone.connect_remote_state.write();
+                                        if let Some(r) = remote.as_mut() {
+                                            r.track = Some(unified);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
             }
 
             other => {
@@ -667,7 +836,94 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
     }
 }
 
+// ── Controller commands ──────────────────────────────────────────────────────
+
+/// Handle a controller command: translate it to a `CtrlSrvrSetPlayerState` and send.
+async fn handle_ctrl_cmd(
+    session: &qonductor::DeviceSession,
+    connect: &mut ConnectState,
+    cmd: ConnectCtrlCmd,
+) {
+    use qonductor::PlayingState;
+    let playing = PlayingState::Playing as i32;
+    let paused  = PlayingState::Paused  as i32;
+
+    let (ps, pos, qid): (Option<i32>, Option<u32>, Option<u32>) = match cmd {
+        ConnectCtrlCmd::Play  => (Some(playing), None, None),
+        ConnectCtrlCmd::Pause => (Some(paused),  None, None),
+        ConnectCtrlCmd::Seek(ms) => (None, Some(ms), None),
+        ConnectCtrlCmd::Next => {
+            let next_id = adjacent_queue_item_id(&connect.queue, connect.current_queue_item_id, 1);
+            if let Some(id) = next_id {
+                connect.current_queue_item_id = Some(id as i32);
+            }
+            (Some(playing), Some(0), next_id)
+        }
+        ConnectCtrlCmd::Prev => {
+            let prev_id = adjacent_queue_item_id(&connect.queue, connect.current_queue_item_id, -1);
+            // prev_id=None means we're going to track[0] (queue_item_id=None)
+            connect.current_queue_item_id = prev_id.map(|id| id as i32);
+            (Some(playing), Some(0), prev_id)
+        }
+        // Handled before reaching here; included for exhaustiveness
+        ConnectCtrlCmd::LocalTrackStarted(_) => return,
+    };
+
+    info!("Connect ctrl: sending CtrlSrvrSetPlayerState ps={ps:?} pos={pos:?} qid={qid:?}");
+    if let Err(e) = session.control_player(ps, pos, qid).await {
+        warn!("Connect ctrl: failed to send player state: {e}");
+    }
+}
+
+/// Find the queue_item_id `delta` steps away from the current track.
+/// Returns `None` for the first track (queue_item_id=None in proto convention).
+fn adjacent_queue_item_id(
+    queue: &[msg::QueueTrackRef],
+    current_id: Option<i32>,
+    delta: i32,
+) -> Option<u32> {
+    // Find position of current track in the queue
+    let current_pos = if let Some(id) = current_id {
+        queue.iter().position(|t| t.queue_item_id == Some(id as u64)).unwrap_or(0)
+    } else {
+        0 // current_id=None → first track (index 0)
+    };
+    let target = current_pos as i32 + delta;
+    if target < 0 { return None; }
+    queue.get(target as usize)?.queue_item_id.map(|id| id as u32)
+}
+
 // ── Track fetching ──────────────────────────────────────────────────────────
+
+/// Fetch Qobuz track metadata and return it as a UnifiedTrack (no audio bytes, no playback).
+async fn fetch_track_as_unified(state: &Arc<AppState>, track_id: i64) -> Option<UnifiedTrack> {
+    let qobuz = state.qobuz.read().clone()?;
+    let track = qobuz.get_track(track_id).await.ok()?;
+    let cover_url = track
+        .album
+        .as_ref()
+        .and_then(|a| a.image.as_ref())
+        .and_then(|img| img.large.clone().or_else(|| img.small.clone()));
+    let artist = track
+        .performer
+        .as_ref()
+        .map(|p| p.name.clone())
+        .or_else(|| track.album.as_ref().and_then(|a| a.artist.as_ref()).map(|a| a.name.clone()))
+        .unwrap_or_else(|| "Unknown".to_string());
+    let album_title = track.album.as_ref().map(|a| a.title.clone()).unwrap_or_default();
+    Some(UnifiedTrack {
+        id: track_id.to_string(),
+        title: track.title,
+        artist,
+        album: album_title,
+        duration_seconds: track.duration,
+        cover_url,
+        source: TrackSource::Qobuz { track_id },
+        quality_label: None,
+        sample_rate: track.maximum_sampling_rate,
+        bit_depth: track.maximum_bit_depth,
+    })
+}
 
 async fn fetch_and_play(
     state: Arc<AppState>,

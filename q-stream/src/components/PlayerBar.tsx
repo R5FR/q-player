@@ -47,6 +47,12 @@ export default function PlayerBar() {
 
   const track = playback.current_track;
 
+  // True when we've cast to another renderer (they are the active output, not us)
+  const isCastingToOther = connectRenderers.some((r) => r.is_active);
+  // True when Q-Stream itself is the active renderer and something is playing
+  const isPlayingHere = !isCastingToOther && !!track;
+  const castingToName = isCastingToOther ? (connectRenderers.find((r) => r.is_active)?.name ?? "autre appareil") : null;
+
   useEffect(() => {
     setLocalVolume(playback.volume);
   }, [playback.volume]);
@@ -79,13 +85,19 @@ export default function PlayerBar() {
 
   const togglePlay = async () => {
     try {
-      if (playback.is_playing) {
-        await api.pause();
+      if (isCastingToOther) {
+        // Control the remote renderer
+        const action = playback.is_playing ? "pause" : "play";
+        await api.controlRendererPlayback(action);
       } else {
-        await api.resume();
+        if (playback.is_playing) {
+          await api.pause();
+        } else {
+          await api.resume();
+        }
+        const state = await api.getPlaybackState();
+        setPlayback(state);
       }
-      const state = await api.getPlaybackState();
-      setPlayback(state);
     } catch (e) {
       console.error(e);
     }
@@ -93,8 +105,12 @@ export default function PlayerBar() {
 
   const handleNext = async () => {
     try {
-      const state = await api.nextTrack();
-      if (state) setPlayback(state);
+      if (isCastingToOther) {
+        await api.controlRendererPlayback("next");
+      } else {
+        const state = await api.nextTrack();
+        if (state) setPlayback(state);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -102,8 +118,12 @@ export default function PlayerBar() {
 
   const handlePrev = async () => {
     try {
-      const state = await api.previousTrack();
-      if (state) setPlayback(state);
+      if (isCastingToOther) {
+        await api.controlRendererPlayback("prev");
+      } else {
+        const state = await api.previousTrack();
+        if (state) setPlayback(state);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -123,9 +143,13 @@ export default function PlayerBar() {
     const posMs = seekValueRef.current;
     setSeekOverride(posMs);
     try {
-      await api.seek(posMs);
-      const state = await api.getPlaybackState();
-      setPlayback(state);
+      if (isCastingToOther) {
+        await api.controlRendererPlayback("seek", posMs);
+      } else {
+        await api.seek(posMs);
+        const state = await api.getPlaybackState();
+        setPlayback(state);
+      }
     } catch (err) {
       console.error("Seek failed:", err);
     }
@@ -174,10 +198,17 @@ export default function PlayerBar() {
     setShowSleepMenu(false);
   };
 
-  // Refresh renderer list whenever the menu opens
+  // Background poll: always keep renderer list fresh (drives icon state)
+  useEffect(() => {
+    const refresh = () => api.getConnectRenderers().then(setConnectRenderers).catch(() => {});
+    refresh();
+    const id = setInterval(refresh, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Faster refresh + re-scan when the Connect menu is open
   useEffect(() => {
     if (!showConnectMenu) return;
-    // Re-scan on every open so fresh devices appear quickly
     api.scanConnectDevices().catch(() => {});
     const refresh = () => api.getConnectRenderers().then(setConnectRenderers).catch(() => {});
     refresh();
@@ -462,41 +493,58 @@ export default function PlayerBar() {
                 if (opening) api.scanConnectDevices().catch(() => {});
               }}
               title="Qobuz Connect"
-              className="relative text-qs-accent transition-colors"
+              className={`relative transition-colors ${
+                isCastingToOther
+                  ? "text-qs-accent"
+                  : "text-qs-text-dim hover:text-qs-text"
+              }`}
             >
               <Cast className="w-4 h-4" />
-              <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-qs-accent animate-pulse shadow-neon-sm" />
+              {isCastingToOther && (
+                <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-qs-accent animate-pulse shadow-neon-sm" />
+              )}
             </button>
             <div
               className={`absolute bottom-full right-0 mb-3 w-60 glass rounded-xl overflow-hidden z-50
                 transition-all duration-150 origin-bottom-right
                 ${showConnectMenu ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
             >
+              {/* Header */}
               <div className="px-3 py-2 border-b border-qs-text/[0.07] flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-qs-accent animate-pulse flex-shrink-0" />
-                <p className="font-condensed text-[9px] font-semibold text-qs-accent uppercase tracking-[0.18em]">
-                  Qobuz Connect — Actif
-                </p>
-              </div>
-
-              {/* This device */}
-              <div className="px-3 py-2.5 flex items-center gap-2.5 text-qs-accent bg-qs-accent/5">
-                <span className="relative flex-shrink-0">
-                  <Cast className="w-3.5 h-3.5" />
-                  <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-qs-accent animate-pulse" />
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-sans text-xs truncate">Q-Stream</p>
-                  <p className="font-condensed text-[9px] text-qs-text-dim/50 uppercase tracking-wider">
-                    Cet appareil · Visible dans Qobuz
+                {isCastingToOther ? (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-qs-accent animate-pulse flex-shrink-0" />
+                    <p className="font-condensed text-[9px] font-semibold text-qs-accent uppercase tracking-[0.18em] truncate">
+                      Lecture sur {castingToName}
+                    </p>
+                  </>
+                ) : (
+                  <p className="font-condensed text-[9px] font-semibold text-qs-text-dim uppercase tracking-[0.18em]">
+                    Appareils réseau
                   </p>
-                </div>
+                )}
               </div>
 
-              {/* Other devices on the network */}
+              {/* This device — only shown when Q-Stream is the active renderer */}
+              {isPlayingHere && (
+                <div className="px-3 py-2.5 flex items-center gap-2.5 text-qs-accent bg-qs-accent/5">
+                  <span className="relative flex-shrink-0">
+                    <Cast className="w-3.5 h-3.5" />
+                    <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-qs-accent animate-pulse" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-sans text-xs truncate">Q-Stream</p>
+                    <p className="font-condensed text-[9px] text-qs-text-dim/50 uppercase tracking-wider">
+                      Cet appareil · Lecture en cours
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Other discovered devices */}
               {connectRenderers.length > 0 && (
                 <>
-                  <div className="mx-3 my-0.5 h-px bg-qs-text/[0.05]" />
+                  {isPlayingHere && <div className="mx-3 my-0.5 h-px bg-qs-text/[0.05]" />}
                   {connectRenderers.map((r) => (
                     <button
                       key={r.renderer_id}
@@ -529,7 +577,7 @@ export default function PlayerBar() {
                 </>
               )}
 
-              {connectRenderers.length === 0 && (
+              {connectRenderers.length === 0 && !isPlayingHere && (
                 <div className="px-3 py-3 text-center">
                   <p className="font-sans text-[10px] text-qs-text-dim/50">
                     Recherche d'appareils…

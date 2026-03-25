@@ -266,6 +266,18 @@ impl AudioQuality {
 
 // ── Playback State ──
 
+/// Playback state of a remote Qobuz Connect renderer (populated while Q-Stream is inactive/cast).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectRemoteState {
+    pub is_playing: bool,
+    /// Position in ms at the time of the last RestoreState update.
+    pub position_ms: u64,
+    pub duration_ms: u64,
+    /// Unix timestamp (ms) when position_ms was captured, used to interpolate.
+    pub last_updated_at_ms: u64,
+    pub track: Option<UnifiedTrack>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaybackState {
     pub is_playing: bool,

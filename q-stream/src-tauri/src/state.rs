@@ -29,6 +29,27 @@ pub struct AppState {
     pub connect_mdns_daemon: std::sync::Mutex<Option<mdns_sd::ServiceDaemon>>,
     /// Channel to send cast-to-renderer commands into the running Connect loop.
     pub connect_cast_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<u64>>>,
+    /// Channel to send controller playback commands (play/pause/seek/next/prev) when casting.
+    pub connect_ctrl_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<ConnectCtrlCmd>>>,
+    /// Playback state of the remote renderer while Q-Stream is inactive (cast).
+    /// None when Q-Stream is the active renderer.
+    pub connect_remote_state: RwLock<Option<crate::models::ConnectRemoteState>>,
+    /// Q-Stream's own renderer_id as assigned by the Qobuz server.
+    /// Used to exclude ourselves from the "other renderers" list.
+    pub connect_own_renderer_id: RwLock<Option<u64>>,
+}
+
+/// Playback control commands sent to the active renderer when Q-Stream acts as controller.
+#[derive(Debug)]
+pub enum ConnectCtrlCmd {
+    Play,
+    Pause,
+    Seek(u32),  // ms
+    Next,
+    Prev,
+    /// Q-Stream started playing a local track: push it into the server queue
+    /// so the mobile can see the title.
+    LocalTrackStarted(u32),  // Qobuz track_id
 }
 
 impl AppState {
@@ -48,6 +69,9 @@ impl AppState {
             connect_renderers: RwLock::new(Vec::new()),
             connect_mdns_daemon: std::sync::Mutex::new(None),
             connect_cast_tx: tokio::sync::Mutex::new(None),
+            connect_ctrl_tx: tokio::sync::Mutex::new(None),
+            connect_remote_state: RwLock::new(None),
+            connect_own_renderer_id: RwLock::new(None),
         }
     }
 }
