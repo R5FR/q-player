@@ -383,7 +383,7 @@ export default function EqView() {
   const syncEq = useCallback(() => {
     if (syncRef.current) clearTimeout(syncRef.current);
     syncRef.current = setTimeout(() => {
-      api.setEq(activeBands, eqEnabled).catch(() => {});
+      api.setEq(activeBands, eqEnabled, eqAdvanced).catch(() => {});
     }, 120);
   }, [activeBands, eqEnabled]);
 

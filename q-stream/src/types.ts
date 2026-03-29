@@ -143,6 +143,8 @@ export interface PlaybackState {
   quality?: string;
   sample_rate?: number;
   bit_depth?: number;
+  /** Actual sample rate the DAC stream was opened at (0 = unknown). */
+  output_sample_rate: number;
 }
 
 export interface QueueState {
@@ -215,4 +217,22 @@ export interface EqBand {
   gain: number;   // dB, -12 to +12
   q: number;      // Q factor (bandwidth)
   label: string;  // Display name
+}
+
+// ── User Config (persisted to config.toml) ──
+
+/** Backend EQ band format (no label). */
+export interface EqBandParam {
+  freq: number;
+  gain_db: number;
+  q: number;
+}
+
+/** Matches the Rust UserConfig struct. */
+export interface UserConfig {
+  volume: number;
+  audio_device?: string;
+  eq_enabled: boolean;
+  eq_bands: EqBandParam[];
+  eq_advanced: boolean;
 }

@@ -134,11 +134,13 @@ interface AppStore {
   eqEnabled: boolean;
   setEqEnabled: (v: boolean) => void;
   eqBands: EqBand[];
+  setEqBands: (bands: EqBand[]) => void;
   updateEqBand: (index: number, gain: number) => void;
   resetEq: () => void;
   eqAdvanced: boolean;
   setEqAdvanced: (v: boolean) => void;
   eqBandsAdvanced: EqBand[];
+  setEqBandsAdvanced: (bands: EqBand[]) => void;
   updateEqBandAdvanced: (index: number, gain: number) => void;
   resetEqAdvanced: () => void;
   showEqPanel: boolean;
@@ -215,6 +217,7 @@ export const useStore = create<AppStore>((set) => ({
     position_ms: 0,
     duration_ms: 0,
     volume: 0.7,
+    output_sample_rate: 0,
   },
   setPlayback: (playback) => set({ playback }),
 
@@ -302,6 +305,7 @@ export const useStore = create<AppStore>((set) => ({
   eqEnabled: false,
   setEqEnabled: (eqEnabled) => set({ eqEnabled }),
   eqBands: DEFAULT_EQ_BANDS,
+  setEqBands: (eqBands) => set({ eqBands }),
   updateEqBand: (index, gain) => set((state) => {
     const bands = state.eqBands.map((b, i) => i === index ? { ...b, gain } : b);
     return { eqBands: bands };
@@ -310,6 +314,7 @@ export const useStore = create<AppStore>((set) => ({
   eqAdvanced: false,
   setEqAdvanced: (eqAdvanced) => set({ eqAdvanced }),
   eqBandsAdvanced: DEFAULT_EQ_BANDS_ADVANCED,
+  setEqBandsAdvanced: (eqBandsAdvanced) => set({ eqBandsAdvanced }),
   updateEqBandAdvanced: (index, gain) => set((state) => {
     const bands = state.eqBandsAdvanced.map((b, i) => i === index ? { ...b, gain } : b);
     return { eqBandsAdvanced: bands };

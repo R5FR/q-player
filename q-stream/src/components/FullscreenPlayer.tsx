@@ -131,7 +131,7 @@ function SpectrumViz() {
           height: "45%",
           opacity: 0,
           pointerEvents: "none",
-          background: "radial-gradient(ellipse 90% 100% at 50% 100%, rgb(var(--qs-accent) / 0.2) 0%, transparent 70%)",
+          background: "radial-gradient(ellipse 90% 100% at 50% 100%, rgb(var(--fs-accent) / 0.2) 0%, transparent 70%)",
         }}
       />
       {/* Bars + peak markers */}
@@ -151,10 +151,10 @@ function SpectrumViz() {
               opacity: 0.2,
               background:
                 "linear-gradient(to bottom," +
-                "  rgb(var(--qs-accent)) 0%," +
-                "  rgb(var(--qs-accent) / 0.65) 30%," +
-                "  rgb(var(--qs-accent) / 0.28) 65%," +
-                "  rgb(var(--qs-accent) / 0.05) 100%)",
+                "  rgb(var(--fs-accent)) 0%," +
+                "  rgb(var(--fs-accent) / 0.65) 30%," +
+                "  rgb(var(--fs-accent) / 0.28) 65%," +
+                "  rgb(var(--fs-accent) / 0.05) 100%)",
             }} />
           </div>
         ))}
@@ -217,6 +217,7 @@ export default function FullscreenPlayer({ onClose }: Props) {
     shuffle, setShuffle,
     repeatMode, cycleRepeat,
     setIsSeeking,
+    dominantColor,
     queue, setQueue, setIsFullscreen,
   } = useStore(s => ({
     playback:        s.playback,
@@ -226,10 +227,22 @@ export default function FullscreenPlayer({ onClose }: Props) {
     repeatMode:      s.repeatMode,
     cycleRepeat:     s.cycleRepeat,
     setIsSeeking:    s.setIsSeeking,
+    dominantColor:   s.dominantColor,
     queue:           s.queue,
     setQueue:        s.setQueue,
     setIsFullscreen: s.setIsFullscreen,
   }), shallow);
+
+  // Derive a vivid accent from the album dominant color.
+  // If the color is too dark, boost it so it stays visible over the dark background.
+  const [dr, dg, db] = dominantColor;
+  const maxC  = Math.max(dr, dg, db);
+  const scale = maxC < 60 ? 240 / Math.max(maxC, 1) : maxC < 120 ? 200 / Math.max(maxC, 1) : 1;
+  const accentR = Math.min(255, Math.round(dr * scale));
+  const accentG = Math.min(255, Math.round(dg * scale));
+  const accentB = Math.min(255, Math.round(db * scale));
+  // Space-separated format for CSS `rgb(var(--fs-accent))` and `rgb(var(--fs-accent) / 0.x)` syntax
+  const accentStr = `${accentR} ${accentG} ${accentB}`;
 
   const [seekOverride, setSeekOverride]   = useState<number | null>(null);
   const [localVolume,  setLocalVolume]    = useState(playback.volume);
@@ -308,7 +321,7 @@ export default function FullscreenPlayer({ onClose }: Props) {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.25 }}
       className="fixed inset-0 z-[9999] overflow-hidden"
-      style={{ background: "#03030a" }}
+      style={{ background: "#03030a", "--fs-accent": accentStr, "--qs-accent": accentStr } as React.CSSProperties}
     >
       {/* ──────── DIAGNOSTIC OVERLAY (Ctrl+Shift+D) ──────── */}
       {showDiag && <SpectrumDiag />}
@@ -385,10 +398,10 @@ export default function FullscreenPlayer({ onClose }: Props) {
             title="File d'attente"
             className="w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150"
             style={{
-              color:      showQueue ? "rgb(var(--qs-accent))" : "rgba(255,255,255,0.45)",
-              background: showQueue ? "rgb(var(--qs-accent) / 0.12)" : "rgba(0,0,0,0.35)",
+              color:      showQueue ? "rgb(var(--fs-accent))" : "rgba(255,255,255,0.45)",
+              background: showQueue ? "rgb(var(--fs-accent) / 0.12)" : "rgba(0,0,0,0.35)",
               backdropFilter: "blur(12px)",
-              border: `1px solid ${showQueue ? "rgb(var(--qs-accent) / 0.25)" : "rgba(255,255,255,0.1)"}`,
+              border: `1px solid ${showQueue ? "rgb(var(--fs-accent) / 0.25)" : "rgba(255,255,255,0.1)"}`,
             }}
           >
             <ListMusic style={{ width: 16, height: 16 }} />
@@ -401,17 +414,12 @@ export default function FullscreenPlayer({ onClose }: Props) {
           {/* Album artwork */}
           <motion.div
             layoutId="player-cover"
-            animate={playback.is_playing ? { y: [0, -7, 0] } : { y: 0 }}
-            transition={playback.is_playing
-              ? { y: { duration: 4.5, ease: "easeInOut", repeat: Infinity } }
-              : { y: { duration: 0.6, ease: "easeOut" } }
-            }
             className="rounded-2xl overflow-hidden flex-shrink-0"
             style={{
               width:  "min(320px, 34vh)",
               height: "min(320px, 34vh)",
               boxShadow: playback.is_playing
-                ? "0 0 0 1px rgba(255,255,255,0.07), 0 0 80px rgb(var(--qs-accent) / 0.18), 0 45px 90px rgba(0,0,0,0.95)"
+                ? `0 0 0 1px rgba(255,255,255,0.07), 0 0 80px rgba(${accentR},${accentG},${accentB},0.22), 0 45px 90px rgba(0,0,0,0.95)`
                 : "0 0 0 1px rgba(255,255,255,0.05), 0 45px 90px rgba(0,0,0,0.9)",
               transition: "box-shadow 0.9s ease",
             }}
@@ -487,8 +495,8 @@ export default function FullscreenPlayer({ onClose }: Props) {
                 <div style={{
                   height: "100%",
                   width: `${progress}%`,
-                  background: "rgb(var(--qs-accent))",
-                  boxShadow: "0 0 10px rgb(var(--qs-accent) / 0.5)",
+                  background: "rgb(var(--fs-accent))",
+                  boxShadow: "0 0 10px rgb(var(--fs-accent) / 0.5)",
                   transition: seekOverride !== null ? "none" : "width 0.5s linear",
                 }} />
               </div>
@@ -498,7 +506,7 @@ export default function FullscreenPlayer({ onClose }: Props) {
                 className="absolute inset-0 w-full opacity-0 cursor-pointer" />
               {/* Thumb */}
               <div className="absolute top-1/2 -translate-y-1/2 rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                style={{ width: 14, height: 14, left: `calc(${progress}% - 7px)`, background: "rgb(var(--qs-accent))", boxShadow: "0 0 14px rgb(var(--qs-accent) / 0.8)" }} />
+                style={{ width: 14, height: 14, left: `calc(${progress}% - 7px)`, background: "rgb(var(--fs-accent))", boxShadow: "0 0 14px rgb(var(--fs-accent) / 0.8)" }} />
             </div>
             <div className="flex justify-between">
               <span className="font-mono text-[10px] tabular-nums" style={{ color: "rgba(255,255,255,0.3)" }}>{fmt(currentPos)}</span>
@@ -510,9 +518,9 @@ export default function FullscreenPlayer({ onClose }: Props) {
           <div className="flex items-center justify-center gap-9 mb-5">
             {/* Shuffle */}
             <motion.button whileTap={{ scale: 0.88 }} onClick={handleShuffle} className="relative transition-colors duration-150"
-              style={{ color: shuffle ? "rgb(var(--qs-accent))" : "rgba(255,255,255,0.38)" }}>
+              style={{ color: shuffle ? "rgb(var(--fs-accent))" : "rgba(255,255,255,0.38)" }}>
               <Shuffle className="w-5 h-5" />
-              {shuffle && <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full" style={{ background: "rgb(var(--qs-accent))" }} />}
+              {shuffle && <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full" style={{ background: "rgb(var(--fs-accent))" }} />}
             </motion.button>
 
             {/* Prev */}
@@ -527,8 +535,8 @@ export default function FullscreenPlayer({ onClose }: Props) {
               onClick={togglePlay}
               className="w-[72px] h-[72px] rounded-full flex items-center justify-center"
               style={{
-                background: "rgb(var(--qs-accent))",
-                boxShadow: "0 0 45px rgb(var(--qs-accent) / 0.45), 0 0 22px rgb(var(--qs-accent) / 0.22), 0 14px 32px rgba(0,0,0,0.65)",
+                background: "rgb(var(--fs-accent))",
+                boxShadow: "0 0 45px rgb(var(--fs-accent) / 0.45), 0 0 22px rgb(var(--fs-accent) / 0.22), 0 14px 32px rgba(0,0,0,0.65)",
               }}
             >
               {playback.is_playing
@@ -545,14 +553,14 @@ export default function FullscreenPlayer({ onClose }: Props) {
 
             {/* Repeat */}
             <motion.button whileTap={{ scale: 0.88 }} onClick={cycleRepeat} className="relative transition-colors duration-150"
-              style={{ color: repeatMode !== "off" ? "rgb(var(--qs-accent))" : "rgba(255,255,255,0.38)" }}>
+              style={{ color: repeatMode !== "off" ? "rgb(var(--fs-accent))" : "rgba(255,255,255,0.38)" }}>
               <Repeat className="w-5 h-5" />
               {repeatMode === "one" && (
                 <span className="absolute -top-2 -right-2 font-mono text-[7px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center"
-                  style={{ background: "rgb(var(--qs-accent))", color: "#03030a" }}>1</span>
+                  style={{ background: "rgb(var(--fs-accent))", color: "#03030a" }}>1</span>
               )}
               {repeatMode !== "off" && (
-                <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full" style={{ background: "rgb(var(--qs-accent))" }} />
+                <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full" style={{ background: "rgb(var(--fs-accent))" }} />
               )}
             </motion.button>
           </div>
@@ -564,7 +572,7 @@ export default function FullscreenPlayer({ onClose }: Props) {
             </button>
             <input type="range" min={0} max={1} step={0.01} value={localVolume} onChange={handleVolume}
               className="volume-slider flex-1 cursor-pointer"
-              style={{ background: `linear-gradient(to right, rgb(var(--qs-accent)) ${localVolume * 100}%, rgb(var(--qs-accent) / 0.15) ${localVolume * 100}%)` }}
+              style={{ background: `linear-gradient(to right, rgb(var(--fs-accent)) ${localVolume * 100}%, rgb(var(--fs-accent) / 0.15) ${localVolume * 100}%)` }}
             />
           </div>
         </div>
@@ -608,8 +616,8 @@ export default function FullscreenPlayer({ onClose }: Props) {
             {/* Currently playing */}
             {track && (
               <div className="mx-4 mt-4 mb-2 p-3 rounded-xl flex-shrink-0"
-                style={{ background: "rgb(var(--qs-accent) / 0.06)", border: "1px solid rgb(var(--qs-accent) / 0.12)" }}>
-                <p className="font-condensed text-[8px] font-semibold uppercase tracking-[0.18em] mb-2" style={{ color: "rgb(var(--qs-accent))" }}>
+                style={{ background: "rgb(var(--fs-accent) / 0.06)", border: "1px solid rgb(var(--fs-accent) / 0.12)" }}>
+                <p className="font-condensed text-[8px] font-semibold uppercase tracking-[0.18em] mb-2" style={{ color: "rgb(var(--fs-accent))" }}>
                   En lecture
                 </p>
                 <div className="flex items-center gap-2.5">

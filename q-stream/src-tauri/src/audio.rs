@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -271,6 +271,8 @@ pub struct AudioPlayer {
     position_ms: Arc<AtomicU64>,
     duration_ms: Arc<AtomicU64>,
     is_finished: Arc<AtomicBool>,
+    /// Actual sample rate of the open DAC stream (set by decoder thread, 0 = unknown).
+    output_stream_sr: Arc<AtomicU32>,
 
     /// EQ state shared with decoder thread.
     pub eq_state: Arc<parking_lot::Mutex<EqSharedState>>,
@@ -291,6 +293,7 @@ impl AudioPlayer {
         let position_ms = Arc::new(AtomicU64::new(0));
         let duration_ms = Arc::new(AtomicU64::new(0));
         let is_finished = Arc::new(AtomicBool::new(true));
+        let output_stream_sr = Arc::new(AtomicU32::new(0));
         let eq_state: Arc<parking_lot::Mutex<EqSharedState>> =
             Arc::new(parking_lot::Mutex::new(EqSharedState::default()));
         let spectrum: Arc<parking_lot::Mutex<Vec<f32>>> =
@@ -301,6 +304,7 @@ impl AudioPlayer {
             position_ms: position_ms.clone(),
             duration_ms: duration_ms.clone(),
             is_finished: is_finished.clone(),
+            output_stream_sr: output_stream_sr.clone(),
             eq_state: eq_state.clone(),
             spectrum: spectrum.clone(),
         };
@@ -324,6 +328,7 @@ impl AudioPlayer {
                 position_ms,
                 duration_ms,
                 is_finished,
+                output_stream_sr,
                 eq_state,
                 spectrum,
             },
@@ -501,6 +506,7 @@ impl AudioPlayer {
             quality: self.current_track.as_ref().and_then(|t| t.quality_label.clone()),
             sample_rate: self.current_sample_rate,
             bit_depth: self.current_bit_depth,
+            output_sample_rate: self.output_stream_sr.load(Ordering::Relaxed),
         }
     }
 }
@@ -512,6 +518,7 @@ struct SharedState {
     position_ms: Arc<AtomicU64>,
     duration_ms: Arc<AtomicU64>,
     is_finished: Arc<AtomicBool>,
+    output_stream_sr: Arc<AtomicU32>,
     eq_state: Arc<parking_lot::Mutex<EqSharedState>>,
     spectrum: Arc<parking_lot::Mutex<Vec<f32>>>,
 }
@@ -608,9 +615,24 @@ fn decoder_thread(
                             }
                         }
                     }
-                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device, new_sr.filter(|_| is_asio));
+                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device, new_sr.filter(|_| is_asio), &shared.output_stream_sr);
                     paused = false;
                     if let Some(sk) = &sink { sk.play(); }
+                    // Log Hi-Res status so the user can verify DAC output
+                    if let Some(content_sr) = new_sr {
+                        let stream_sr = shared.output_stream_sr.load(Ordering::Relaxed);
+                        if stream_sr > 0 {
+                            let hires = content_sr >= 88200;
+                            if content_sr == stream_sr {
+                                info!("Audio: {}kHz/{} → DAC {}kHz [bit-perfect{}]",
+                                    content_sr / 1000, content_sr % 1000,
+                                    stream_sr / 1000,
+                                    if hires { " Hi-Res" } else { "" });
+                            } else {
+                                warn!("Audio: content {}Hz but DAC stream {}Hz — rate mismatch!", content_sr, stream_sr);
+                            }
+                        }
+                    }
                     if let Some(ms) = seek_to_ms {
                         if let Some(ds) = &mut dec_state {
                             position_at_start_ms = ms;
@@ -647,7 +669,7 @@ fn decoder_thread(
                                     }
                                 }
                             }
-                            ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device, new_sr.filter(|_| is_asio));
+                            ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device, new_sr.filter(|_| is_asio), &shared.output_stream_sr);
                             paused = false;
                             if let Some(sk) = &sink { sk.play(); }
                             if let Some(ms) = seek_to_ms {
@@ -698,7 +720,29 @@ fn decoder_thread(
                         position_at_start_ms += start.elapsed().as_millis() as u64;
                     }
                     paused = true;
-                    if let Some(sk) = &sink { sk.pause(); }
+                    // Clear the sink buffer so audio stops immediately (no trailing samples).
+                    // Then rebuild the decoder at the current position so Resume is seamless.
+                    if let Some(sk) = &sink { sk.clear(); sk.pause(); }
+                    let current_pos = position_at_start_ms;
+                    let reloaded = if let Some(ref bytes) = cached_bytes {
+                        let arc_cursor = ArcCursor { data: bytes.clone(), pos: 0 };
+                        create_decoder(Box::new(arc_cursor), None, &shared)
+                    } else if let Some(ref path) = cached_file {
+                        File::open(path).ok().and_then(|f| create_decoder(Box::new(f), None, &shared))
+                    } else {
+                        None
+                    };
+                    if let Some(mut new_ds) = reloaded {
+                        let secs = current_pos / 1000;
+                        let frac = (current_pos % 1000) as f64 / 1000.0;
+                        if new_ds.format.seek(SeekMode::Accurate, SeekTo::Time {
+                            time: Time::new(secs, frac), track_id: None,
+                        }).is_ok() {
+                            new_ds.decoder.reset();
+                            new_ds.sample_buf = None;
+                        }
+                        dec_state = Some(new_ds);
+                    }
                 }
 
                 AudioCommand::Resume => {
@@ -780,7 +824,7 @@ fn decoder_thread(
                     preferred_device = name;
                     current_stream_sr = 0; // force SR negotiation on next LoadBytes/LoadFile
                     // Open the new device at its default SR (will be corrected on next play).
-                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device, None);
+                    ensure_sink(&mut _stream, &mut _handle, &mut sink, volume, &preferred_device, None, &shared.output_stream_sr);
                     // Playback stops; user must press play again
                     dec_state = None;
                     playback_start = None;
@@ -974,7 +1018,10 @@ fn compute_log_spectrum(
 
     fft.process(&mut buf);
 
-    let min_f = 20.0_f32;
+    // Start at 40 Hz: at 44.1 kHz with a 2048-pt FFT, bins below ~21 Hz all map
+    // to FFT bin 1, making the leftmost bars move identically ("glued" appearance).
+    // 40 Hz is the lowest useful resolution without duplicates.
+    let min_f = 40.0_f32;
     let max_f = (sample_rate as f32 / 2.0).min(20000.0);
 
     (0..n_bins)
@@ -1177,6 +1224,7 @@ fn ensure_sink(
     volume: f32,
     device_name: &Option<String>,
     sample_rate: Option<u32>,
+    output_stream_sr: &Arc<AtomicU32>,
 ) {
     if sink.is_some() {
         return;
@@ -1186,6 +1234,8 @@ fn ensure_sink(
         Ok((s, h)) => match Sink::try_new(&h) {
             Ok(sk) => {
                 sk.set_volume(AudioPlayer::cubic_volume(volume));
+                let actual_sr = sample_rate.unwrap_or(0);
+                output_stream_sr.store(actual_sr, Ordering::Relaxed);
                 *stream = Some(s);
                 *handle = Some(h);
                 *sink = Some(sk);

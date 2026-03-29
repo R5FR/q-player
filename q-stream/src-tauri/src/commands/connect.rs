@@ -136,6 +136,11 @@ struct ConnectState {
     pending_play: Option<(u64, Option<u32>)>,
     /// track_id the remote renderer is currently playing (tracked via RestoreState).
     last_remote_track_id: Option<u32>,
+    /// Suppress the first SetState-triggered auto-play after activation.
+    /// The Qobuz server always sends a restoration SetState right after SetActive,
+    /// replaying the previous session's track. We skip this initial auto-play;
+    /// any subsequent user-initiated action will clear this flag.
+    suppress_initial_play: bool,
 }
 
 impl ConnectState {
@@ -149,6 +154,7 @@ impl ConnectState {
             duration_ms: 0,
             pending_play: None,
             last_remote_track_id: None,
+            suppress_initial_play: true,
         }
     }
 
@@ -416,6 +422,8 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
                 info!(">>> CMD SetActive (device activated by Qobuz app)");
                 // Clear remote state: Q-Stream is now the active renderer again
                 *state.connect_remote_state.write() = None;
+                // Suppress the upcoming server restoration SetState (previous session replay).
+                connect.suppress_initial_play = true;
                 let pb = state.player.read().playback_state();
                 respond.send(ActivationState {
                     muted: false,
@@ -497,6 +505,19 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
                 );
 
                 if should_load_new && will_play {
+                    // Suppress the very first server-initiated play after activation.
+                    // The server always sends a restoration SetState to replay the previous
+                    // session's track right after SetActive — we skip this silently.
+                    if connect.suppress_initial_play {
+                        info!("Connect: suppressing initial auto-play restoration (track_id={:?})", requested_track_id);
+                        connect.suppress_initial_play = false;
+                        connect.current_track_id = requested_track_id;
+                        connect.current_queue_item_id = queue_item_id;
+                        connect.playing = PlayingState::Stopped;
+                        respond.send(connect.renderer_state());
+                        return;
+                    }
+
                     // New track requested — respond with Buffering immediately,
                     // then fetch + play in a background task.
                     connect.current_track_id = requested_track_id;
@@ -529,7 +550,8 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
                     // Respond with current state so the server doesn't time out.
                     respond.send(connect.renderer_state());
                 } else {
-                    // Same track: play/pause/seek/stop
+                    // Same track: play/pause/seek/stop — user is interacting, clear suppression
+                    connect.suppress_initial_play = false;
                     match new_state {
                         PlayingState::Playing => {
                             state.player.write().resume();

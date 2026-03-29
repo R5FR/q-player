@@ -18,6 +18,7 @@ import type {
   ArtistEnrichment,
   PersistentAppData,
   EqBand,
+  UserConfig,
 } from "./types";
 
 // ── Auth ──
@@ -256,10 +257,10 @@ export async function lastfmScrobble(
 
 // ── Equalizer ──
 
-export async function setEq(bands: EqBand[], enabled: boolean): Promise<void> {
+export async function setEq(bands: EqBand[], enabled: boolean, advanced = false): Promise<void> {
   // Map frontend `gain` → Rust `gain_db`
   const backendBands = bands.map((b) => ({ freq: b.freq, gain_db: b.gain, q: b.q }));
-  return invoke("set_eq", { bands: backendBands, enabled });
+  return invoke("set_eq", { bands: backendBands, enabled, advanced });
 }
 
 export async function getEqState(): Promise<{ enabled: boolean; bands: EqBand[] }> {
@@ -286,6 +287,10 @@ export async function getAudioDevices(): Promise<string[]> {
 
 export async function setAudioDevice(deviceName: string | null): Promise<void> {
   return invoke("set_audio_device", { deviceName });
+}
+
+export async function loadConfig(): Promise<UserConfig> {
+  return invoke("load_config");
 }
 
 // ── Qobuz Connect ──

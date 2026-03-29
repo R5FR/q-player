@@ -83,6 +83,11 @@ pub async fn seek(position_ms: u64, state: State<'_, Arc<AppState>>) -> Result<(
 #[tauri::command]
 pub async fn set_volume(volume: f32, state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.player.write().set_volume(volume);
+    {
+        let mut cfg = state.config.lock();
+        cfg.volume = volume;
+        crate::config::save(&cfg);
+    }
     Ok(())
 }
 
@@ -203,9 +208,17 @@ async fn play_qobuz_track(
 pub async fn set_eq(
     bands: Vec<EqBandParam>,
     enabled: bool,
+    advanced: bool,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    state.player.write().set_eq(bands, enabled);
+    state.player.write().set_eq(bands.clone(), enabled);
+    {
+        let mut cfg = state.config.lock();
+        cfg.eq_bands = bands;
+        cfg.eq_enabled = enabled;
+        cfg.eq_advanced = advanced;
+        crate::config::save(&cfg);
+    }
     Ok(())
 }
 
@@ -243,8 +256,21 @@ pub async fn set_audio_device(
     device_name: Option<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    state.player.write().set_preferred_device(device_name);
+    state.player.write().set_preferred_device(device_name.clone());
+    {
+        let mut cfg = state.config.lock();
+        cfg.audio_device = device_name.or(Some("Default".to_string()));
+        crate::config::save(&cfg);
+    }
     Ok(())
+}
+
+/// Return the saved user config so the frontend can restore its UI state on startup.
+#[tauri::command]
+pub async fn load_config(
+    state: State<'_, Arc<AppState>>,
+) -> Result<crate::config::UserConfig, String> {
+    Ok(state.config.lock().clone())
 }
 
 /// Play the track at a given queue index, reusing the metadata already stored in the queue entry.

@@ -288,6 +288,9 @@ pub struct PlaybackState {
     pub quality: Option<String>,
     pub sample_rate: Option<f64>,
     pub bit_depth: Option<i32>,
+    /// Actual sample rate the DAC stream was opened at (0 = not yet opened / unknown).
+    /// For ASIO this should match sample_rate exactly (bit-perfect).
+    pub output_sample_rate: u32,
 }
 
 // ── Unified Track (Qobuz + Local) ──

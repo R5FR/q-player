@@ -8,6 +8,8 @@ use std::sync::{mpsc, Arc};
 /// Shared application state managed by Tauri
 pub struct AppState {
     pub qobuz: RwLock<Option<QobuzClient>>,
+    /// Persisted user preferences (audio device, volume, EQ).
+    pub config: parking_lot::Mutex<crate::config::UserConfig>,
     pub player: RwLock<AudioPlayer>,
     pub queue: RwLock<VecDeque<UnifiedTrack>>,
     pub current_index: RwLock<Option<usize>>,
@@ -57,6 +59,7 @@ impl AppState {
         let (player, event_rx, spectrum) = AudioPlayer::new();
         Self {
             qobuz: RwLock::new(None),
+            config: parking_lot::Mutex::new(crate::config::load()),
             player: RwLock::new(player),
             queue: RwLock::new(VecDeque::new()),
             current_index: RwLock::new(None),

@@ -232,12 +232,19 @@ export default function PlayerBar() {
 
   const qualityBadge = () => {
     if (!playback.quality) return null;
+    const contentSr = playback.sample_rate ? playback.sample_rate * 1000 : 0; // kHz → Hz
+    const outputSr = playback.output_sample_rate ?? 0;
     const isHires =
       (playback.bit_depth && playback.bit_depth > 16) ||
       (playback.sample_rate && playback.sample_rate > 44.1);
+    // Show warning if DAC stream rate doesn't match content rate
+    const srMismatch = outputSr > 0 && contentSr > 0 && Math.abs(outputSr - contentSr) > 100;
     return (
-      <span className={isHires ? "quality-hires" : "quality-lossless"}>
-        {playback.quality}
+      <span
+        className={srMismatch ? "quality-lossless" : isHires ? "quality-hires" : "quality-lossless"}
+        title={outputSr > 0 ? `DAC: ${(outputSr / 1000).toFixed(1)} kHz${srMismatch ? " ⚠ rate mismatch" : ""}` : undefined}
+      >
+        {playback.quality}{srMismatch ? " ⚠" : ""}
       </span>
     );
   };

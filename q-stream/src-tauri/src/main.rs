@@ -5,6 +5,7 @@
 
 mod audio;
 mod commands;
+mod config;
 mod lastfm;
 mod local_library;
 mod models;
@@ -28,6 +29,21 @@ fn main() {
         .init();
 
     let app_state = Arc::new(AppState::new());
+
+    // Apply saved user config to the audio player at startup
+    {
+        let cfg = app_state.config.lock().clone();
+        let mut player = app_state.player.write();
+        player.set_volume(cfg.volume);
+        if let Some(ref device) = cfg.audio_device {
+            if device != "Default" {
+                player.set_preferred_device(Some(device.clone()));
+            }
+        }
+        if !cfg.eq_bands.is_empty() {
+            player.set_eq(cfg.eq_bands.clone(), cfg.eq_enabled);
+        }
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -131,6 +147,8 @@ fn main() {
             // Persistence
             commands::persistence::load_app_data,
             commands::persistence::save_app_data,
+            // Config
+            commands::playback::load_config,
             // Last.fm
             commands::lastfm::lastfm_start_auth,
             commands::lastfm::lastfm_complete_auth,

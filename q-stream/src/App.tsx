@@ -17,6 +17,7 @@ export default function App() {
     isSeeking, sleepTimerEndMs, setSleepTimer,
     isDarkMode,
     isFullscreen, setIsFullscreen,
+    setEqBands, setEqBandsAdvanced, setEqEnabled, setEqAdvanced, setSelectedDevice,
   } = useStore();
 
   // Apply dark/light class on <html> for CSS variable theming
@@ -24,7 +25,7 @@ export default function App() {
     document.documentElement.classList.toggle("light", !isDarkMode);
   }, [isDarkMode]);
 
-  // Restore persisted Qobuz + Last.fm sessions, then load app data from disk
+  // Restore persisted Qobuz + Last.fm sessions, then load app data and user config from disk
   useEffect(() => {
     api.restoreSession().then(setSession).catch(() => api.getSession().then(setSession).catch(console.error));
     api.lastfmGetSession().then((s) => { if (s) setLastfmUser(s); }).catch(() => {});
@@ -33,6 +34,41 @@ export default function App() {
       if (data.recently_played.length) setRecentlyPlayed(data.recently_played);
       if (data.dismissed_albums.length) setDismissedAlbums(data.dismissed_albums);
       if (data.search_history.length) setSearchHistory(data.search_history);
+    }).catch(() => {});
+
+    // Restore user config: EQ bands, EQ mode, and selected audio device.
+    // Volume is already applied to the audio engine by the backend at startup.
+    api.loadConfig().then((cfg) => {
+      // Default band definitions (freq/q/label), same as store.ts
+      const defaults5 = [
+        { freq: 60,    q: 0.9, label: "Bass"     },
+        { freq: 250,   q: 1.0, label: "Low Mid"  },
+        { freq: 1000,  q: 1.0, label: "Mid"      },
+        { freq: 4000,  q: 1.0, label: "High Mid" },
+        { freq: 14000, q: 0.9, label: "Treble"   },
+      ];
+      const defaults10 = [
+        { freq: 32,    q: 0.9, label: "Sub"      },
+        { freq: 64,    q: 0.9, label: "Bass"     },
+        { freq: 125,   q: 1.0, label: "Low Bass" },
+        { freq: 250,   q: 1.0, label: "Low Mid"  },
+        { freq: 500,   q: 1.0, label: "Mid"      },
+        { freq: 1000,  q: 1.0, label: "Upper"    },
+        { freq: 2000,  q: 1.0, label: "Presence" },
+        { freq: 4000,  q: 1.0, label: "High Mid" },
+        { freq: 8000,  q: 0.9, label: "High"     },
+        { freq: 16000, q: 0.9, label: "Air"      },
+      ];
+      if (cfg.eq_advanced && cfg.eq_bands.length === 10) {
+        setEqBandsAdvanced(defaults10.map((d, i) => ({ ...d, gain: cfg.eq_bands[i]?.gain_db ?? 0 })));
+      } else if (!cfg.eq_advanced && cfg.eq_bands.length === 5) {
+        setEqBands(defaults5.map((d, i) => ({ ...d, gain: cfg.eq_bands[i]?.gain_db ?? 0 })));
+      }
+      setEqEnabled(cfg.eq_enabled);
+      setEqAdvanced(cfg.eq_advanced);
+      if (cfg.audio_device && cfg.audio_device !== "Default") {
+        setSelectedDevice(cfg.audio_device);
+      }
     }).catch(() => {});
   }, []);
 
