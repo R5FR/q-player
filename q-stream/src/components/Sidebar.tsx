@@ -16,6 +16,7 @@ import {
   Library,
   BookMarked,
   SlidersHorizontal,
+  Settings,
   Sun,
   Moon,
 } from "lucide-react";
@@ -28,6 +29,7 @@ const TOP_NAV: Array<{ icon: typeof Home; label: string; view: ViewType }> = [
   { icon: Home, label: "Accueil", view: "home" },
   { icon: Search, label: "Rechercher", view: "search" },
   { icon: SlidersHorizontal, label: "Égaliseur", view: "eq" },
+  { icon: Settings, label: "Paramètres", view: "settings" },
 ];
 
 const LIBRARY_NAV: Array<{

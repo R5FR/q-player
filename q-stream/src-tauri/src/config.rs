@@ -9,6 +9,13 @@ fn config_path() -> std::path::PathBuf {
         .join("config.toml")
 }
 
+/// Returns the OS default music directory (e.g. ~/Music on Windows/macOS/Linux).
+pub fn default_music_folder() -> Option<String> {
+    dirs::audio_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Music")))
+        .map(|p| p.to_string_lossy().to_string())
+}
+
 /// User preferences persisted across sessions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserConfig {
@@ -27,6 +34,9 @@ pub struct UserConfig {
     /// Whether 10-band advanced EQ mode is active.
     #[serde(default)]
     pub eq_advanced: bool,
+    /// Local music library folder (None = use OS default).
+    #[serde(default)]
+    pub music_folder: Option<String>,
 }
 
 fn default_volume() -> f32 {
@@ -41,6 +51,7 @@ impl Default for UserConfig {
             eq_enabled: false,
             eq_bands: Vec::new(),
             eq_advanced: false,
+            music_folder: None,
         }
     }
 }

@@ -95,6 +95,8 @@ interface AppStore {
   // Local library
   localTracks: LocalTrack[];
   setLocalTracks: (t: LocalTrack[]) => void;
+  musicFolder: string;
+  setMusicFolder: (f: string) => void;
 
   // Recently played
   recentlyPlayed: UnifiedTrack[];
@@ -254,6 +256,8 @@ export const useStore = create<AppStore>((set) => ({
   // Local library
   localTracks: [],
   setLocalTracks: (localTracks) => set({ localTracks }),
+  musicFolder: "",
+  setMusicFolder: (musicFolder) => set({ musicFolder }),
 
   // Recently played
   recentlyPlayed: [],

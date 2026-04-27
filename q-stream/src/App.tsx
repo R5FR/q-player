@@ -18,6 +18,7 @@ export default function App() {
     isDarkMode,
     isFullscreen, setIsFullscreen,
     setEqBands, setEqBandsAdvanced, setEqEnabled, setEqAdvanced, setSelectedDevice,
+    setLocalTracks, setMusicFolder,
   } = useStore();
 
   // Apply dark/light class on <html> for CSS variable theming
@@ -70,6 +71,12 @@ export default function App() {
         setSelectedDevice(cfg.audio_device);
       }
     }).catch(() => {});
+
+    // Resolve effective music folder then auto-scan it
+    api.getDefaultMusicFolder().then((folder) => {
+      setMusicFolder(folder);
+      return api.scanMusicFolder();
+    }).then(setLocalTracks).catch(() => {});
   }, []);
 
   // Auto-save persistent data 1 s after any change (debounced)

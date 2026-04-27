@@ -1,30 +1,25 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { FolderOpen, FolderPlus, Play, Music } from "lucide-react";
+import { FolderOpen, Play, Music, Settings, RefreshCw } from "lucide-react";
 import { useStore } from "../../store";
 import * as api from "../../api";
-import { open } from "@tauri-apps/plugin-dialog";
 
 export default function LocalView() {
-  const { localTracks, setLocalTracks } = useStore();
+  const { localTracks, setLocalTracks, musicFolder, setView } = useStore();
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     api.getLocalTracks().then(setLocalTracks).catch(console.error);
   }, []);
 
-  const handleImport = async () => {
+  const handleRefresh = async () => {
     try {
-      const selected = await open({ directory: true, multiple: false });
-      if (!selected) return;
-
       setLoading(true);
-      const tracks = await api.importFolder(selected as string);
-      const all = await api.getLocalTracks();
-      setLocalTracks(all);
-      setLoading(false);
+      const tracks = await api.scanMusicFolder();
+      setLocalTracks(tracks);
     } catch (e) {
       console.error(e);
+    } finally {
       setLoading(false);
     }
   };
@@ -43,7 +38,6 @@ export default function LocalView() {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Group by album
   const albums = localTracks.reduce(
     (acc, track) => {
       const key = `${track.artist} - ${track.album}`;
@@ -56,34 +50,56 @@ export default function LocalView() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-3">
           <FolderOpen className="w-6 h-6 text-qs-green" />
-          <h1 className="text-2xl font-bold text-white">Local Music</h1>
+          <h1 className="text-2xl font-bold text-white">Musique locale</h1>
           <span className="text-sm text-qs-text-dim">
-            {localTracks.length} tracks
+            {localTracks.length} titres
           </span>
         </div>
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={handleImport}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 glass rounded-xl text-sm font-medium hover:bg-white/10 transition disabled:opacity-50"
-        >
-          <FolderPlus className="w-4 h-4" />
-          {loading ? "Scanning..." : "Import Folder"}
-        </motion.button>
+        <div className="flex items-center gap-2">
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={handleRefresh}
+            disabled={loading}
+            title="Rescanner le dossier"
+            className="flex items-center gap-2 px-3 py-2 glass rounded-xl text-sm font-medium hover:bg-white/10 transition disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setView("settings")}
+            title="Paramètres"
+            className="flex items-center gap-2 px-3 py-2 glass rounded-xl text-sm font-medium hover:bg-white/10 transition"
+          >
+            <Settings className="w-4 h-4" />
+          </motion.button>
+        </div>
       </div>
+
+      {musicFolder && (
+        <p className="text-xs text-qs-text-dim mb-6 truncate" title={musicFolder}>
+          {musicFolder}
+        </p>
+      )}
 
       {localTracks.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-qs-text-dim">
           <Music className="w-12 h-12 mb-4 opacity-30" />
-          <p className="text-lg">No local music imported</p>
+          <p className="text-lg">Aucune musique locale trouvée</p>
           <p className="text-sm mt-1">
-            Click "Import Folder" to scan your music library
+            Vérifiez le dossier dans{" "}
+            <button
+              onClick={() => setView("settings")}
+              className="text-qs-accent underline hover:text-qs-accent/80"
+            >
+              Paramètres
+            </button>
           </p>
           <p className="text-xs mt-3 text-qs-text-dim">
-            Supports FLAC, MP3, M4A, AAC, OGG, WAV, AIFF
+            Formats supportés : FLAC, MP3, M4A, AAC, OGG, WAV, AIFF
           </p>
         </div>
       ) : (

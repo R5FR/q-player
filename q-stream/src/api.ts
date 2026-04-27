@@ -213,6 +213,18 @@ export async function playLocalTrack(filePath: string): Promise<PlaybackState> {
   return invoke("play_local_track", { filePath });
 }
 
+export async function getDefaultMusicFolder(): Promise<string> {
+  return invoke("get_default_music_folder");
+}
+
+export async function setMusicFolder(path: string): Promise<LocalTrack[]> {
+  return invoke("set_music_folder", { path });
+}
+
+export async function scanMusicFolder(): Promise<LocalTrack[]> {
+  return invoke("scan_music_folder");
+}
+
 // ── UI ──
 
 export async function extractDominantColor(imageUrl: string): Promise<[number, number, number]> {

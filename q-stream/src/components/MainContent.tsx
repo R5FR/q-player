@@ -11,6 +11,7 @@ import PlaylistView from "./views/PlaylistView";
 import QueueView from "./views/QueueView";
 import LocalView from "./views/LocalView";
 import EqView from "./views/EqView";
+import SettingsView from "./views/SettingsView";
 
 const viewComponents: Record<string, React.FC> = {
   home: HomeView,
@@ -22,6 +23,7 @@ const viewComponents: Record<string, React.FC> = {
   queue: QueueView,
   local: LocalView,
   eq: EqView,
+  settings: SettingsView,
 };
 
 export default function MainContent() {

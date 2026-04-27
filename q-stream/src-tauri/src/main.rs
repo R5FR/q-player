@@ -133,6 +133,9 @@ fn main() {
             commands::local_library::import_folder,
             commands::local_library::get_local_tracks,
             commands::local_library::play_local_track,
+            commands::local_library::get_default_music_folder,
+            commands::local_library::set_music_folder,
+            commands::local_library::scan_music_folder,
             // Color extraction
             commands::ui::extract_dominant_color,
             // Recommendations

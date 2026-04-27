@@ -180,7 +180,8 @@ export type ViewType =
   | "playlist"
   | "queue"
   | "local"
-  | "eq";
+  | "eq"
+  | "settings";
 
 export interface LastFmUserSession {
   session_key: string;
@@ -235,4 +236,5 @@ export interface UserConfig {
   eq_enabled: boolean;
   eq_bands: EqBandParam[];
   eq_advanced: boolean;
+  music_folder?: string;
 }
