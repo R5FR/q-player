@@ -251,6 +251,7 @@ enum AudioCommand {
 #[derive(Debug, Clone)]
 pub enum PlayerEvent {
     TrackEnded,
+    #[allow(dead_code)]
     Spectrum(Vec<f32>),
 }
 
@@ -278,6 +279,7 @@ pub struct AudioPlayer {
     pub eq_state: Arc<parking_lot::Mutex<EqSharedState>>,
 
     /// Latest spectrum data (80 bins), written by decoder thread, read by frontend poll.
+    #[allow(dead_code)]
     pub spectrum: Arc<parking_lot::Mutex<Vec<f32>>>,
 }
 
@@ -485,6 +487,7 @@ impl AudioPlayer {
     }
 
     /// Returns the latest spectrum data (80 bins, 0.0–1.0 normalized).
+    #[allow(dead_code)]
     pub fn get_spectrum(&self) -> Vec<f32> {
         self.spectrum.lock().clone()
     }

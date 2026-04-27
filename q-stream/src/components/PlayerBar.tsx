@@ -532,7 +532,7 @@ export default function PlayerBar() {
                 )}
               </div>
 
-              {/* This device — only shown when Q-Stream is the active renderer */}
+              {/* This device — active when Q-Stream is the renderer */}
               {isPlayingHere && (
                 <div className="px-3 py-2.5 flex items-center gap-2.5 text-qs-accent bg-qs-accent/5">
                   <span className="relative flex-shrink-0">
@@ -546,6 +546,25 @@ export default function PlayerBar() {
                     </p>
                   </div>
                 </div>
+              )}
+
+              {/* Cast back — shown when playing on another renderer */}
+              {isCastingToOther && (
+                <button
+                  onClick={() => {
+                    api.castToOwnRenderer().catch(console.error);
+                    setShowConnectMenu(false);
+                  }}
+                  className="w-full px-3 py-2.5 font-sans text-xs flex items-center gap-2.5 text-left transition-colors text-qs-text-dim hover:text-qs-text hover:bg-qs-accent/5"
+                >
+                  <Cast className="w-3.5 h-3.5 flex-shrink-0 opacity-50" />
+                  <div className="flex-1 min-w-0">
+                    <p className="truncate">Q-Stream</p>
+                    <p className="font-condensed text-[9px] text-qs-text-dim/50 uppercase tracking-wider">
+                      Cet appareil · Reprendre ici
+                    </p>
+                  </div>
+                </button>
               )}
 
               {/* Other discovered devices */}

@@ -202,6 +202,7 @@ pub struct QobuzCredential {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct QobuzFeatured {
     pub albums: Option<QobuzAlbumList>,
 }

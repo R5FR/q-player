@@ -273,6 +273,22 @@ pub async fn control_renderer_playback(
     }
 }
 
+/// Transfer playback back to Q-Stream (undo a previous cast).
+/// Uses Q-Stream's own renderer_id received at registration.
+#[tauri::command]
+pub async fn cast_to_own_renderer(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let own_id = *state.connect_own_renderer_id.read();
+    let own_id = own_id.ok_or("Q-Stream renderer ID not yet assigned — Connect session may still be starting")?;
+    let guard = state.connect_cast_tx.lock().await;
+    match &*guard {
+        Some(tx) => tx
+            .send(own_id)
+            .await
+            .map_err(|e| format!("Cast channel closed: {e}")),
+        None => Err("Qobuz Connect is not running".to_string()),
+    }
+}
+
 /// Transfer playback to an external Qobuz Connect renderer.
 /// The Qobuz server will deactivate Q-Stream and activate the target renderer.
 #[tauri::command]
@@ -382,15 +398,32 @@ async fn run_connect_loop(
                 }
             }
             Some(cmd) = ctrl_rx.recv() => {
-                if let ConnectCtrlCmd::LocalTrackStarted(track_id) = cmd {
-                    info!("Connect: local track started (track_id={track_id}), pushing to server queue");
-                    connect.current_track_id = Some(track_id);
-                    connect.current_queue_item_id = None; // will be updated by QueueLoadTracks
-                    if let Err(e) = session.push_queue(vec![track_id]).await {
-                        warn!("Connect: push_queue failed: {e}");
+                match cmd {
+                    ConnectCtrlCmd::LocalTrackStarted(track_id) => {
+                        info!("Connect: local track started (track_id={track_id}), pushing to server queue");
+                        connect.current_track_id = Some(track_id);
+                        connect.current_queue_item_id = None;
+                        connect.playing = PlayingState::Playing;
+                        connect.suppress_initial_play = false;
+                        if let Err(e) = session.push_queue(vec![track_id]).await {
+                            warn!("Connect: push_queue failed: {e}");
+                        }
                     }
-                } else {
-                    handle_ctrl_cmd(&session, &mut connect, cmd).await;
+                    ConnectCtrlCmd::LocalPaused => {
+                        connect.playing = PlayingState::Paused;
+                        let pb = state.player.read().playback_state();
+                        connect.position_ms = pb.position_ms as u32;
+                    }
+                    ConnectCtrlCmd::LocalResumed => {
+                        connect.playing = PlayingState::Playing;
+                        connect.suppress_initial_play = false;
+                    }
+                    ConnectCtrlCmd::LocalSeeked(ms) => {
+                        connect.position_ms = ms;
+                    }
+                    other => {
+                        handle_ctrl_cmd(&session, &mut connect, other).await;
+                    }
                 }
             }
         }
@@ -495,10 +528,9 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
                     && queue_item_id != connect.current_queue_item_id;
                 let should_load_new = is_new_track || (is_new_queue_item && requested_track_id.is_some());
 
-                // Play unless phone explicitly sets Stopped state; no explicit state → play.
-                let will_play = explicit_state
-                    .map(|s| s != PlayingState::Stopped)
-                    .unwrap_or(true);
+                // Only Playing (or absent) state means "user wants to play".
+                // Paused / Stopped should not trigger a new load or deferred-play.
+                let will_play = matches!(explicit_state, Some(PlayingState::Playing) | None);
 
                 info!(
                     "    → is_new_track={is_new_track}  is_new_queue_item={is_new_queue_item}  should_load_new={should_load_new}  will_play={will_play}"
@@ -643,20 +675,25 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
                 let selected_track_id = first.and_then(|t| t.track_id);
                 if is_fresh_selection {
                     if let Some(track_id) = selected_track_id {
-                        if Some(track_id) != connect.current_track_id {
+                        let is_same_track = Some(track_id) == connect.current_track_id;
+                        if !is_same_track {
                             info!("Connect: QueueLoadTracks → new track selected: {track_id}, starting playback");
-                            connect.current_track_id = Some(track_id);
-                            connect.current_queue_item_id = None;
-                            connect.playing = PlayingState::Playing;
-                            connect.pending_play = None;
-                            let state_clone = state.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = fetch_and_play(state_clone, track_id as i64, None).await {
-                                    error!("Connect: QueueLoadTracks fetch_and_play failed: {e}");
-                                }
-                            });
-                            return; // skip pending_play resolution — new play supersedes it
+                        } else {
+                            // User explicitly re-selected the same track (e.g. tapped it again on phone).
+                            // Player was paused by the preceding SetState(Paused); restart from scratch.
+                            info!("Connect: QueueLoadTracks → same track re-selected ({track_id}), restarting");
                         }
+                        connect.current_track_id = Some(track_id);
+                        connect.current_queue_item_id = None;
+                        connect.playing = PlayingState::Playing;
+                        connect.pending_play = None;
+                        let state_clone = state.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = fetch_and_play(state_clone, track_id as i64, None).await {
+                                error!("Connect: QueueLoadTracks fetch_and_play failed: {e}");
+                            }
+                        });
+                        return; // skip pending_play resolution — new play supersedes it
                     }
                 }
 
@@ -718,7 +755,14 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
                     let name = info.friendly_name.unwrap_or_else(|| "Unknown".into());
                     let model = info.model.unwrap_or_default();
                     let mut list = state.connect_renderers.write();
-                    if !list.iter().any(|x| x.renderer_id == id) {
+                    // Upgrade existing mDNS entry (hash-based ID) for same device name
+                    // so ActiveRendererChanged (which uses Qobuz numeric IDs) can mark it active.
+                    if let Some(existing) = list.iter_mut().find(|x| x.name == name) {
+                        existing.renderer_id = id;
+                        if !model.is_empty() {
+                            existing.model = model;
+                        }
+                    } else if !list.iter().any(|x| x.renderer_id == id) {
                         list.push(ConnectRenderer { renderer_id: id, name, model, is_active: false });
                     }
                 }
@@ -762,6 +806,35 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
                 );
                 state.player.write().pause();
                 connect.playing = PlayingState::Paused;
+            }
+
+            Notification::VolumeChanged(v) => {
+                let own_id = *state.connect_own_renderer_id.read();
+                // Only apply if targeted at Q-Stream (own renderer_id).
+                // renderer_id=None = broadcast; own_id=None = not yet registered (apply anyway).
+                let for_us = own_id.map_or(true, |id| v.renderer_id == Some(id));
+                if for_us {
+                    if let Some(vol) = v.volume {
+                        let vol_f = (vol as f32) / 100.0;
+                        info!(">>> NOTIF VolumeChanged vol={vol} ({vol_f:.2})");
+                        state.player.write().set_volume(vol_f);
+                        let mut cfg = state.config.lock();
+                        cfg.volume = vol_f;
+                        crate::config::save(&cfg);
+                    }
+                }
+            }
+
+            Notification::VolumeMuted(m) => {
+                let own_id = *state.connect_own_renderer_id.read();
+                let for_us = own_id.map_or(true, |id| m.renderer_id == Some(id));
+                if for_us {
+                    info!(">>> NOTIF VolumeMuted muted={:?}", m.value);
+                    if m.value == Some(true) {
+                        state.player.write().set_volume(0.0);
+                    }
+                    // Unmute: server sends VolumeChanged with restored level right after.
+                }
             }
 
             Notification::Connected => info!(">>> NOTIF Connected (WebSocket established)"),
@@ -887,8 +960,11 @@ async fn handle_ctrl_cmd(
             connect.current_queue_item_id = prev_id.map(|id| id as i32);
             (Some(playing), Some(0), prev_id)
         }
-        // Handled before reaching here; included for exhaustiveness
-        ConnectCtrlCmd::LocalTrackStarted(_) => return,
+        // Handled before reaching this function; included for exhaustiveness
+        ConnectCtrlCmd::LocalTrackStarted(_)
+        | ConnectCtrlCmd::LocalPaused
+        | ConnectCtrlCmd::LocalResumed
+        | ConnectCtrlCmd::LocalSeeked(_) => return,
     };
 
     info!("Connect ctrl: sending CtrlSrvrSetPlayerState ps={ps:?} pos={pos:?} qid={qid:?}");

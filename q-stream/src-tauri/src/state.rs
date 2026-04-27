@@ -41,17 +41,26 @@ pub struct AppState {
     pub connect_own_renderer_id: RwLock<Option<u64>>,
 }
 
-/// Playback control commands sent to the active renderer when Q-Stream acts as controller.
+/// Playback control commands sent through the Connect ctrl channel.
 #[derive(Debug)]
 pub enum ConnectCtrlCmd {
+    // ── Remote renderer control (used after cast) ──
     Play,
     Pause,
     Seek(u32),  // ms
     Next,
     Prev,
-    /// Q-Stream started playing a local track: push it into the server queue
-    /// so the mobile can see the title.
+
+    // ── Local playback sync (keep ConnectState in step with local player) ──
+
+    /// Q-Stream started playing a Qobuz track locally: push it into the server queue.
     LocalTrackStarted(u32),  // Qobuz track_id
+    /// Local player was paused (user pressed pause in Q-Stream UI).
+    LocalPaused,
+    /// Local player was resumed (user pressed play in Q-Stream UI).
+    LocalResumed,
+    /// Local player seeked to a new position.
+    LocalSeeked(u32),  // ms
 }
 
 impl AppState {

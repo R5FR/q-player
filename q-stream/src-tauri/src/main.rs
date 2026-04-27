@@ -166,6 +166,7 @@ fn main() {
             commands::connect::get_connect_status,
             commands::connect::get_connect_renderers,
             commands::connect::cast_to_renderer,
+            commands::connect::cast_to_own_renderer,
             commands::connect::control_renderer_playback,
         ])
         .run(tauri::generate_context!())

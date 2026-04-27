@@ -328,6 +328,7 @@ impl RecommendationEngine {
     }
 
     /// Kept for backward compatibility (used by smart_shuffle).
+    #[allow(dead_code)]
     pub async fn get_recent_artists(
         &self,
         username: &str,

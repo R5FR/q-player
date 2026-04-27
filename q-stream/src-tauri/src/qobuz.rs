@@ -611,6 +611,7 @@ impl QobuzClient {
         }
     }
 
+    #[allow(dead_code)]
     pub fn user_auth_token(&self) -> &str {
         &self.user_auth_token
     }

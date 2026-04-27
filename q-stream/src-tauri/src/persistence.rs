@@ -1,4 +1,4 @@
-use crate::models::{PersistentAppData, SearchHistoryEntry};
+use crate::models::PersistentAppData;
 use tracing::{info, warn};
 
 fn data_file_path() -> std::path::PathBuf {

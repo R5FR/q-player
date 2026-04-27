@@ -338,6 +338,10 @@ export async function castToRenderer(rendererId: number): Promise<void> {
   return invoke("cast_to_renderer", { rendererId });
 }
 
+export async function castToOwnRenderer(): Promise<void> {
+  return invoke("cast_to_own_renderer");
+}
+
 /** Control the active remote renderer (play/pause/seek/next/prev) after casting. */
 export async function controlRendererPlayback(
   action: "play" | "pause" | "seek" | "next" | "prev",

@@ -60,24 +60,41 @@ pub async fn play_track(
 #[tauri::command]
 pub async fn pause(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.player.write().pause();
+    let ctrl = state.connect_ctrl_tx.lock().await;
+    if let Some(tx) = ctrl.as_ref() {
+        let _ = tx.try_send(ConnectCtrlCmd::LocalPaused);
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn resume(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.player.write().resume();
+    let ctrl = state.connect_ctrl_tx.lock().await;
+    if let Some(tx) = ctrl.as_ref() {
+        let _ = tx.try_send(ConnectCtrlCmd::LocalResumed);
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn stop(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.player.write().stop();
+    let ctrl = state.connect_ctrl_tx.lock().await;
+    if let Some(tx) = ctrl.as_ref() {
+        let _ = tx.try_send(ConnectCtrlCmd::LocalPaused);
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn seek(position_ms: u64, state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    state.player.write().seek(position_ms)
+    state.player.write().seek(position_ms)?;
+    let ctrl = state.connect_ctrl_tx.lock().await;
+    if let Some(tx) = ctrl.as_ref() {
+        let _ = tx.try_send(ConnectCtrlCmd::LocalSeeked(position_ms as u32));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -296,13 +313,14 @@ pub async fn play_from_queue(
 
     match &track.source {
         TrackSource::Qobuz { track_id } => {
+            let tid = *track_id;
             let qobuz = {
                 let guard = state.qobuz.read();
                 guard.clone().ok_or("Not logged in")?
             };
 
             let track_url = qobuz
-                .get_track_url(*track_id)
+                .get_track_url(tid)
                 .await
                 .map_err(|e| e.to_string())?;
 
@@ -311,15 +329,23 @@ pub async fn play_from_queue(
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let mut player = state.player.write();
-            player.play_bytes(
-                bytes,
-                track,
-                Some(track_url.sampling_rate),
-                Some(track_url.bit_depth),
-            )?;
-
-            Ok(player.playback_state())
+            let pb = {
+                let mut player = state.player.write();
+                player.play_bytes(
+                    bytes,
+                    track,
+                    Some(track_url.sampling_rate),
+                    Some(track_url.bit_depth),
+                )?;
+                player.playback_state()
+            };
+            {
+                let ctrl = state.connect_ctrl_tx.lock().await;
+                if let Some(tx) = ctrl.as_ref() {
+                    let _ = tx.try_send(ConnectCtrlCmd::LocalTrackStarted(tid as u32));
+                }
+            }
+            Ok(pb)
         }
         TrackSource::Local { file_path } => {
             let path = PathBuf::from(file_path);
