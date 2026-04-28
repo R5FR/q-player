@@ -6,6 +6,7 @@
 mod audio;
 mod commands;
 mod config;
+mod qonductor;
 mod lastfm;
 mod local_library;
 mod models;

@@ -15,7 +15,7 @@ tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "cookies"] }
+reqwest = { version = "0.12", features = ["json", "cookies", "stream"] }
 regex = "1"
 md-5 = "0.10"
 base64 = "0.22"
@@ -23,7 +23,7 @@ rodio = { version = "0.19", features = ["flac", "mp3", "symphonia-all"] }
 symphonia = { version = "0.5", features = ["all"] }
 cpal = "0.15"
 lofty = "0.21"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "std"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 parking_lot = "0.12"
@@ -36,8 +36,14 @@ walkdir = "2"
 rustfft = "6"
 toml = "0.8"
 urlencoding = "2"
-qonductor = { path = "../../../qonductor-main" }
 mdns-sd = "0.17"
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+axum = "0.8"
+prost = "0.13"
+async-stream = "0.3"
+bytes = "1"
+futures = "0.3"
+rand = "0.8"
 
 [profile.dev]
 # Reduce debug info to line tables only (instead of full DWARF).

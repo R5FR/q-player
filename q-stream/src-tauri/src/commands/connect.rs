@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mdns_sd::ServiceEvent;
-use qonductor::{
+use crate::qonductor::{
     msg, ActivationState, BufferState, Command, DeviceConfig, Notification, PlayingState,
     SessionEvent, SessionInfo, SessionManager,
     msg::{PositionExt, QueueRendererStateExt, SetStateExt},
@@ -935,11 +935,11 @@ async fn handle_event(state: &Arc<AppState>, connect: &mut ConnectState, event: 
 
 /// Handle a controller command: translate it to a `CtrlSrvrSetPlayerState` and send.
 async fn handle_ctrl_cmd(
-    session: &qonductor::DeviceSession,
+    session: &crate::qonductor::DeviceSession,
     connect: &mut ConnectState,
     cmd: ConnectCtrlCmd,
 ) {
-    use qonductor::PlayingState;
+    use crate::qonductor::PlayingState;
     let playing = PlayingState::Playing as i32;
     let paused  = PlayingState::Paused  as i32;
 

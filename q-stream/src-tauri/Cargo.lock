@@ -3683,17 +3683,22 @@ dependencies = [
 name = "q-stream"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
+ "axum",
  "base64 0.22.1",
+ "bytes",
  "chrono",
  "color-thief",
  "cpal",
  "dirs 5.0.1",
+ "futures",
  "image",
  "lofty",
  "md-5",
  "mdns-sd",
  "parking_lot",
- "qonductor",
+ "prost",
+ "rand 0.8.5",
  "regex",
  "reqwest 0.12.28",
  "rodio",
@@ -3708,6 +3713,7 @@ dependencies = [
  "tauri-plugin-shell",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-tungstenite",
  "toml 0.8.2",
  "tracing",
  "tracing-subscriber",
@@ -3723,30 +3729,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
 dependencies = [
  "bytemuck",
-]
-
-[[package]]
-name = "qonductor"
-version = "0.1.0-alpha.3"
-dependencies = [
- "async-stream",
- "axum",
- "base64 0.22.1",
- "bytes",
- "futures",
- "md-5",
- "mdns-sd",
- "prost",
- "rand 0.8.5",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "url",
- "uuid",
 ]
 
 [[package]]
